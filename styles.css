@@ -815,6 +815,38 @@ input:hover {
   text-anchor: middle;
 }
 
+.combat-modifier {
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .7));
+}
+
+.combat-modifier rect {
+  stroke-width: 1.4px;
+}
+
+.combat-modifier text {
+  fill: white;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px;
+  font-weight: 950;
+  text-anchor: middle;
+}
+
+.combat-modifier.modifier-positive rect {
+  fill: rgba(10, 74, 70, .96);
+  stroke: #66eadb;
+}
+
+.combat-modifier.modifier-negative rect {
+  fill: rgba(105, 37, 34, .96);
+  stroke: #ff9a89;
+}
+
+.combat-modifier.modifier-neutral rect {
+  fill: rgba(62, 74, 78, .96);
+  stroke: #a8bbc0;
+}
+
 .hq-emblem {
   filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .85));
 }
@@ -878,7 +910,7 @@ input:hover {
   padding: 28px 28px 26px;
   pointer-events: none;
   background: linear-gradient(to top, rgba(4, 12, 20, .38), transparent 34%);
-  animation: combat-overlay-life 1100ms both;
+  animation: combat-overlay-life 1100ms var(--combat-resume, 0ms) both;
 }
 
 .turn-notification {
@@ -989,7 +1021,7 @@ input:hover {
   color: #071019;
   box-shadow: 0 5px 10px rgba(0, 0, 0, .38), inset 0 -3px 5px rgba(0, 0, 0, .14);
   transform-style: preserve-3d;
-  animation: combat-die-roll 520ms cubic-bezier(.2, .75, .3, 1.1) calc(var(--die-index) * 13ms) both;
+  animation: combat-die-roll 520ms cubic-bezier(.2, .75, .3, 1.1) calc(var(--combat-resume, 0ms) + var(--die-index) * 13ms) both;
 }
 
 .combat-die b {
@@ -1020,7 +1052,7 @@ input:hover {
   line-height: 1;
   opacity: 0;
   text-shadow: 0 0 18px color-mix(in srgb, var(--combat-color) 70%, transparent);
-  animation: combat-result-in 140ms ease-out 540ms forwards;
+  animation: combat-result-in 140ms ease-out var(--combat-result-delay, 540ms) forwards;
 }
 
 .combat-outcome {
@@ -1029,7 +1061,7 @@ input:hover {
   gap: 9px;
   opacity: 0;
   text-align: center;
-  animation: combat-result-in 140ms ease-out 540ms forwards;
+  animation: combat-result-in 140ms ease-out var(--combat-result-delay, 540ms) forwards;
 }
 
 .combat-outcome i {

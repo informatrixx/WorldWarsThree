@@ -94,6 +94,7 @@ export const translations = {
     footer: "Eigenständig entwickelt · Keine Anmeldung · Automatische lokale Speicherung",
     ariaMap: "Interaktive strategische Karte",
     ariaRegion: "{region}, {owner}, {terrain}, {units}",
+    ariaModifier: "relativer Kampfbonus {value}",
   },
   en: {
     title: "Dicefront: Dominion",
@@ -190,6 +191,7 @@ export const translations = {
     footer: "Independently developed · No account · Automatic local save",
     ariaMap: "Interactive strategy map",
     ariaRegion: "{region}, {owner}, {terrain}, {units}",
+    ariaModifier: "relative combat modifier {value}",
   },
 };
 

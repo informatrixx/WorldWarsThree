@@ -107,6 +107,9 @@ export class SoundManager {
     this.effectTimers = new Set();
     this.mediaClips = new Map();
     this.activeMedia = new Set();
+    this.battleMedia = new Set();
+    this.battleBus = null;
+    this.battlePlaybackId = 0;
     this.lastPlaybackError = null;
     this.onFirstInteraction = () => {
       void this.unlock().then((ready) => {
@@ -149,7 +152,7 @@ export class SoundManager {
     this.saveEnabled();
     if (!this.enabled) {
       this.stopAmbientNodes();
-      this.clearEffectTimers();
+      this.stopBattleEffects();
       this.stopMedia();
       if (this.master) this.master.gain.setValueAtTime(0, this.context.currentTime);
       return false;
@@ -196,7 +199,8 @@ export class SoundManager {
     this.matchActive = Boolean(active);
     if (!this.matchActive) {
       this.stopAmbientNodes();
-      this.clearEffectTimers();
+      this.stopBattleEffects();
+      this.stopMedia();
       return;
     }
     void this.unlock();
@@ -289,9 +293,9 @@ export class SoundManager {
     return this.playWithClip(null, effect);
   }
 
-  async playWithClip(clipName, effect) {
+  async playWithClip(clipName, effect, group = null) {
     if (!this.enabled) return false;
-    const mediaPlayback = clipName ? this.playMedia(clipName) : Promise.resolve(false);
+    const mediaPlayback = clipName ? this.playMedia(clipName, group) : Promise.resolve(false);
     const [mediaPlayed, ready] = await Promise.all([mediaPlayback, this.unlock()]);
     if (mediaPlayed) return true;
     if (ready && this.enabled) effect(this.context);
@@ -312,20 +316,29 @@ export class SoundManager {
     return clip;
   }
 
-  async playMedia(name) {
+  async playMedia(name, group = null) {
+    let audio = null;
     try {
       const clip = this.getMediaClip(name);
       if (!clip) return false;
-      const audio = clip.base.cloneNode();
+      audio = clip.base.cloneNode();
       audio.volume = .92;
-      const cleanup = () => this.activeMedia.delete(audio);
+      const cleanup = () => {
+        this.activeMedia.delete(audio);
+        this.battleMedia.delete(audio);
+      };
       audio.addEventListener?.("ended", cleanup, { once: true });
       audio.addEventListener?.("error", cleanup, { once: true });
       this.activeMedia.add(audio);
+      if (group === "battle") this.battleMedia.add(audio);
       await audio.play();
       this.lastPlaybackError = null;
       return true;
     } catch (error) {
+      if (audio) {
+        this.activeMedia.delete(audio);
+        this.battleMedia.delete(audio);
+      }
       this.lastPlaybackError = error?.name || "PlaybackError";
       return false;
     }
@@ -336,9 +349,24 @@ export class SoundManager {
       try { audio.pause(); } catch { /* Stopping media is best effort. */ }
     });
     this.activeMedia.clear();
+    this.battleMedia.clear();
   }
 
-  tone({ frequency, endFrequency = frequency, duration, gain = 0.08, type = "sine", delay = 0 }) {
+  stopBattleEffects() {
+    this.battlePlaybackId += 1;
+    this.battleMedia.forEach((audio) => {
+      try { audio.pause(); } catch { /* Stopping media is best effort. */ }
+      this.activeMedia.delete(audio);
+    });
+    this.battleMedia.clear();
+    this.clearEffectTimers();
+    if (this.battleBus) {
+      try { this.battleBus.disconnect(); } catch { /* The bus may already be disconnected. */ }
+      this.battleBus = null;
+    }
+  }
+
+  tone({ frequency, endFrequency = frequency, duration, gain = 0.08, type = "sine", delay = 0 }, output = this.effects) {
     const now = this.context.currentTime + delay;
     const oscillator = this.context.createOscillator();
     const envelope = this.context.createGain();
@@ -349,12 +377,12 @@ export class SoundManager {
     envelope.gain.exponentialRampToValueAtTime(gain, now + Math.min(0.025, duration / 4));
     envelope.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     oscillator.connect(envelope);
-    envelope.connect(this.effects);
+    envelope.connect(output);
     oscillator.start(now);
     oscillator.stop(now + duration + 0.02);
   }
 
-  noiseClick(delay, frequency) {
+  noiseClick(delay, frequency, output = this.effects) {
     const now = this.context.currentTime + delay;
     const source = this.context.createBufferSource();
     const filter = this.context.createBiquadFilter();
@@ -367,7 +395,7 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.052);
     source.connect(filter);
     filter.connect(gain);
-    gain.connect(this.effects);
+    gain.connect(output);
     source.start(now);
     source.stop(now + 0.06);
   }
@@ -393,22 +421,29 @@ export class SoundManager {
   }
 
   playBattle(attackerWon) {
+    this.stopBattleEffects();
+    const playbackId = ++this.battlePlaybackId;
     return this.playWithClip(attackerWon ? "battle-win" : "battle-loss", () => {
+      if (playbackId !== this.battlePlaybackId) return;
+      const output = this.context.createGain();
+      output.gain.value = 1;
+      output.connect(this.effects);
+      this.battleBus = output;
       [0, .065, .14, .225, .32, .43].forEach((delay, index) => {
-        this.noiseClick(delay, 520 + index * 95 + this.random() * 120);
+        this.noiseClick(delay, 520 + index * 95 + this.random() * 120, output);
       });
       const timer = this.setTimer(() => {
         this.effectTimers.delete(timer);
-        if (!this.enabled || !this.context) return;
+        if (!this.enabled || !this.context || this.battleBus !== output) return;
         if (attackerWon) {
-          this.tone({ frequency: 185, endFrequency: 278, duration: .25, gain: .095 });
-          this.tone({ frequency: 278, endFrequency: 370, duration: .28, gain: .055, delay: .07 });
+          this.tone({ frequency: 185, endFrequency: 278, duration: .25, gain: .095 }, output);
+          this.tone({ frequency: 278, endFrequency: 370, duration: .28, gain: .055, delay: .07 }, output);
         } else {
-          this.tone({ frequency: 150, endFrequency: 82, duration: .32, gain: .11, type: "triangle" });
+          this.tone({ frequency: 150, endFrequency: 82, duration: .32, gain: .11, type: "triangle" }, output);
         }
       }, 540);
       this.effectTimers.add(timer);
-    });
+    }, "battle");
   }
 
   playEndTurn() {
@@ -449,7 +484,7 @@ export class SoundManager {
 
   destroy() {
     this.stopAmbientNodes();
-    this.clearEffectTimers();
+    this.stopBattleEffects();
     this.stopMedia();
     this.mediaClips.forEach(({ url }) => this.host?.URL?.revokeObjectURL?.(url));
     this.mediaClips.clear();

@@ -6,6 +6,7 @@ import {
   deserializeGame,
   endTurn,
   getActivePlayer,
+  getBattleModifierSummary,
   getLegalTargets,
   resolveAttack,
   serializeGame,
@@ -33,6 +34,12 @@ function escapeHtml(value) {
 
 function number(value) {
   return Number(value.toFixed(2));
+}
+
+function signedModifier(value) {
+  if (value > 0) return `+${value}`;
+  if (value < 0) return `−${Math.abs(value)}`;
+  return "±0";
 }
 
 function unitCounts(units) {
@@ -398,6 +405,7 @@ export class GameApp {
       ownerByCell.set(cellKey(cell.q, cell.r), region.id);
     }));
     const legalTargets = this.selectedSource === null ? [] : getLegalTargets(this.state, this.selectedSource);
+    const legalTargetSet = new Set(legalTargets);
     const regions = this.state.map.regions.map((region) => {
       const player = this.state.players[region.ownerId];
       const counts = unitCounts(region.units);
@@ -407,18 +415,22 @@ export class GameApp {
         return `<polygon points="${polygon}" class="region-cell"/><polygon points="${polygon}" class="region-pattern"/>`;
       }).join("");
       const classes = [];
+      const modifier = legalTargetSet.has(region.id)
+        ? getBattleModifierSummary(this.state, this.selectedSource, region.id)
+        : null;
       if (region.isHeadquarters) classes.push("headquarters");
       if (region.id === this.selectedSource) classes.push("selected-source");
-      else if (legalTargets.includes(region.id)) classes.push("legal-target");
-      if (region.id === this.combatAnimation?.battle.sourceId) classes.push("combat-source");
-      if (region.id === this.combatAnimation?.battle.targetId) classes.push("combat-target");
+      else if (legalTargetSet.has(region.id)) classes.push("legal-target");
+      if (this.selectedSource === null && region.id === this.combatAnimation?.battle.sourceId) classes.push("combat-source");
+      if (this.selectedSource === null && region.id === this.combatAnimation?.battle.targetId) classes.push("combat-target");
       const selectedClass = classes.join(" ");
-      const label = this.t("ariaRegion", {
+      let label = this.t("ariaRegion", {
         region: this.t("region", { id: region.id + 1 }),
         owner: playerName(this.state, player.id, this.locale),
         terrain: this.t(region.terrain),
         units: this.t("units", { count: region.units.length }),
       });
+      if (modifier) label += `, ${this.t("ariaModifier", { value: signedModifier(modifier.netBonus) })}`;
       return `
         <g class="region terrain-${region.terrain} ${selectedClass}" data-region-id="${region.id}" tabindex="0" role="button"
           aria-label="${escapeHtml(label)}" style="--region-color:${player.style.color};--region-accent:${player.style.accent};--pattern:url(#player-pattern-${player.id})">
@@ -431,6 +443,7 @@ export class GameApp {
             <text class="unit-total" x="14" y="9">${region.units.length}</text>
             ${region.isHeadquarters ? '<g class="hq-emblem"><circle class="hq-halo" cx="0" cy="-46" r="16"/><path class="hq-marker" d="M-16-53 0-61 16-53 13-36 0-30-13-36Z"/><path class="hq-star" d="M0-56 3-50 10-49 5-44 6-37 0-40-6-37-5-44-10-49-3-50Z"/><text class="hq-label" x="0" y="-45">HQ</text></g>' : ""}
             <text class="unit-mix" y="34">●${counts.infantry} ◆${counts.armor} ▲${counts.artillery}</text>
+            ${modifier ? `<g class="combat-modifier modifier-${modifier.netBonus > 0 ? "positive" : modifier.netBonus < 0 ? "negative" : "neutral"}" transform="translate(0 49)"><rect x="-15" y="-7" width="30" height="14" rx="5"/><text y="3">${signedModifier(modifier.netBonus)}</text></g>` : ""}
           </g>
         </g>
       `;
@@ -518,10 +531,11 @@ export class GameApp {
   renderCombatAnimation() {
     if (!this.combatAnimation) return "";
     const battle = this.combatAnimation.battle;
+    const elapsed = Math.min(COMBAT_ANIMATION_MS, Math.max(0, Date.now() - (this.combatAnimation.startedAt ?? Date.now())));
     const attacker = this.state.players[battle.attackerId];
     const defender = this.state.players[battle.defenderId];
     return `
-      <div class="combat-overlay" aria-hidden="true">
+      <div class="combat-overlay" aria-hidden="true" style="--combat-resume:-${elapsed}ms;--combat-result-delay:${540 - elapsed}ms">
         <div class="combat-roll">
           <div class="combat-side combat-attacker" style="--combat-color:${attacker.style.color}">
             <span>${escapeHtml(this.t("attacker"))}</span>
@@ -729,7 +743,7 @@ export class GameApp {
   }
 
   selectRegion(regionId) {
-    if (this.state.phase !== "playing" || this.combatAnimation) return;
+    if (this.state.phase !== "playing") return;
     const active = getActivePlayer(this.state);
     if (!active.isHuman) return;
     const region = this.state.map.regions[regionId];
@@ -796,7 +810,7 @@ export class GameApp {
   showCombatAnimation(battle, onComplete) {
     if (this.combatAnimationTimer) window.clearTimeout(this.combatAnimationTimer);
     this.playSound(this.audio.playBattle(battle.attackerWon));
-    this.combatAnimation = { battle };
+    this.combatAnimation = { battle, startedAt: Date.now() };
     this.renderGame();
     this.combatAnimationTimer = window.setTimeout(() => {
       this.combatAnimation = null;
@@ -864,7 +878,7 @@ export class GameApp {
 
   onKeyDown(event) {
     if (!this.state) return;
-    if (event.key === "Escape" && !this.combatAnimation) {
+    if (event.key === "Escape") {
       this.selectedSource = null;
       this.selectedTarget = null;
       this.renderGame();

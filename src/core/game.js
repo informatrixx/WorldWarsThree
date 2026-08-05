@@ -317,6 +317,21 @@ function dieModifiers(units, terrain, role) {
   });
 }
 
+export function getBattleModifierSummary(state, sourceId, targetId) {
+  const source = state.map.regions[sourceId];
+  const target = state.map.regions[targetId];
+  if (!source || !target) return null;
+  const attackerBonus = dieModifiers(source.units, target.terrain, "attacker")
+    .reduce((sum, modifier) => sum + modifier, 0);
+  const defenderBonus = dieModifiers(target.units, target.terrain, "defender")
+    .reduce((sum, modifier) => sum + modifier, 0);
+  return {
+    attackerBonus,
+    defenderBonus,
+    netBonus: attackerBonus - defenderBonus,
+  };
+}
+
 function rollArmy(units, terrain, role, rng, forcedRolls) {
   const modifiers = dieModifiers(units, terrain, role);
   return units.map((type, index) => {

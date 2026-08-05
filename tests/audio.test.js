@@ -87,6 +87,10 @@ test("sound starts enabled, creates ambience, and persists mute", async () => {
   await manager.playEnabledCue();
   await manager.playTurnStart(true);
   await manager.playBattle(true);
+  const firstBattleBus = manager.battleBus;
+  await manager.playBattle(false);
+  assert.equal(firstBattleBus.disconnected, true, "fallback battle audio must be disconnected when replaced");
+  assert.notEqual(manager.battleBus, firstBattleBus);
   assert.ok(manager.context.nodes.some((node) => node.kind === "oscillator" && node.started));
   assert.ok(manager.effectTimers.size >= 1, "battle result must be synchronized");
 
@@ -113,6 +117,7 @@ test("audible effects prefer generated WAV media and clean up their URLs", async
   const blobs = [];
   const revoked = [];
   let plays = 0;
+  let pauses = 0;
   class FakeBlob {
     constructor(parts, options) {
       this.parts = parts;
@@ -125,7 +130,7 @@ test("audible effects prefer generated WAV media and clean up their URLs", async
     cloneNode() { return new FakeAudio(this.src); }
     addEventListener() {}
     async play() { plays += 1; }
-    pause() {}
+    pause() { pauses += 1; }
   }
   environment.host.Audio = FakeAudio;
   environment.host.Blob = FakeBlob;
@@ -141,8 +146,12 @@ test("audible effects prefer generated WAV media and clean up their URLs", async
 
   assert.equal(await manager.playSelection(), true);
   assert.equal(await manager.playTurnStart(true), true);
-  assert.equal(plays, 2);
-  assert.equal(blobs.length, 2);
+  assert.equal(await manager.playBattle(true), true);
+  assert.equal(await manager.playBattle(false), true);
+  assert.equal(plays, 4);
+  assert.ok(pauses >= 1, "a new battle must stop the previous battle clip");
+  assert.equal(manager.battleMedia.size, 1);
+  assert.equal(blobs.length, 4);
   assert.equal(blobs.every((blob) => blob.type === "audio/wav"), true);
   assert.equal(new TextDecoder().decode(blobs[0].parts[0].slice(0, 4)), "RIFF");
   const clip = new DataView(blobs[0].parts[0]);
@@ -151,5 +160,5 @@ test("audible effects prefer generated WAV media and clean up their URLs", async
   assert.ok(peak >= .87, "effect clips must be normalized to an audible level");
 
   manager.destroy();
-  assert.equal(revoked.length, 2);
+  assert.equal(revoked.length, 4);
 });

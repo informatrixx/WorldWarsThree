@@ -8,6 +8,7 @@ import {
   createGame,
   deserializeGame,
   endTurn,
+  getBattleModifierSummary,
   getLegalAttacks,
   resolveAttack,
   serializeGame,
@@ -162,6 +163,41 @@ test("ties favor the defender and terrain/class modifiers affect the odds", () =
     defenderRolls: [3, 3],
   });
   assert.equal(tied.battle.attackerWon, false);
+});
+
+test("battle modifier summaries expose relative terrain and class bonuses", () => {
+  const state = createGame(gameConfig({ playerCount: 2 }));
+  const { sourceId, targetId } = firstLegalAttack(state);
+  const source = state.map.regions[sourceId];
+  const target = state.map.regions[targetId];
+  source.units = ["armor", "armor", "artillery", "artillery", "artillery"];
+  target.units = ["infantry", "armor"];
+
+  target.terrain = "plains";
+  assert.deepEqual(getBattleModifierSummary(state, sourceId, targetId), {
+    attackerBonus: 4,
+    defenderBonus: 0,
+    netBonus: 4,
+  });
+
+  target.terrain = "forest";
+  assert.deepEqual(getBattleModifierSummary(state, sourceId, targetId), {
+    attackerBonus: 2,
+    defenderBonus: 1,
+    netBonus: 1,
+  });
+
+  source.units = ["infantry", "infantry"];
+  target.units = ["infantry", "infantry", "infantry"];
+  assert.deepEqual(getBattleModifierSummary(state, sourceId, targetId), {
+    attackerBonus: 0,
+    defenderBonus: 3,
+    netBonus: -3,
+  });
+
+  target.terrain = "plains";
+  assert.equal(getBattleModifierSummary(state, sourceId, targetId).netBonus, 0);
+  assert.equal(getBattleModifierSummary(state, -1, targetId), null);
 });
 
 test("capturing a headquarters eliminates the faction and transfers its territory", () => {
