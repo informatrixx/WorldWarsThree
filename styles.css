@@ -923,6 +923,22 @@ input:hover {
 .log-panel .log-gameWon { color: var(--gold); }
 .log-panel .log-playerEliminated { color: #df8882; }
 
+.log-panel .log-battle.latest {
+  margin: -3px -5px 2px;
+  padding: 7px 7px 7px 18px;
+  border: 1px solid rgba(73, 214, 199, .24);
+  border-radius: 4px;
+  background: rgba(73, 214, 199, .075);
+  color: #e5f5f4;
+}
+
+.log-panel .log-battle.latest::before {
+  top: 12px;
+  left: 7px;
+  background: var(--teal);
+  box-shadow: 0 0 8px rgba(73, 214, 199, .7);
+}
+
 .end-turn {
   flex: none;
 }
@@ -938,7 +954,6 @@ input:hover {
   backdrop-filter: blur(8px);
 }
 
-.battle-modal,
 .victory-modal {
   position: relative;
   width: min(510px, 100%);
@@ -954,7 +969,6 @@ input:hover {
   from { opacity: 0; transform: translateY(10px) scale(.98); }
 }
 
-.battle-modal::before,
 .victory-modal::before {
   position: absolute;
   height: 3px;
@@ -963,127 +977,13 @@ input:hover {
   background: var(--danger);
 }
 
-.battle-modal.won::before,
 .victory-modal.won::before { background: var(--teal); }
 
-.battle-modal h2,
 .victory-modal h2 {
   margin: 7px 0 22px;
   font-size: 27px;
   letter-spacing: -.03em;
 }
-
-.battle-modal {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 13px;
-}
-
-.battle-modal > .panel-kicker,
-.battle-modal > h2,
-.battle-modal > .button,
-.battle-modal > .ai-progress {
-  grid-column: 1 / -1;
-}
-
-.dice-side {
-  display: grid;
-  align-content: start;
-  gap: 9px;
-  padding: 13px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: rgba(5, 14, 23, .56);
-}
-
-.dice-side > span {
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
-
-.dice-side > div {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-
-.dice-side > strong {
-  font-size: 27px;
-}
-
-.die {
-  position: relative;
-  display: inline-flex;
-  width: 36px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border: 1px solid rgba(255,255,255,.2);
-  border-radius: 5px;
-  background: #dbe8e7;
-  color: #071019;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  box-shadow: inset 0 -4px 8px rgba(0,0,0,.16);
-}
-
-.die-armor { background: #edc16e; }
-.die-artillery { background: #a9b8ef; }
-.die img {
-  position: absolute;
-  width: 31px;
-  height: 31px;
-  inset: 1px auto auto 0;
-  object-fit: contain;
-  opacity: .48;
-}
-
-.die b {
-  z-index: 1;
-  display: inline-flex;
-  min-width: 18px;
-  height: 18px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: rgba(242, 249, 248, .88);
-  color: #071019;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  font-weight: 950;
-  box-shadow: 0 1px 4px rgba(0,0,0,.35);
-}
-
-.die sup { color: #168178; font-size: 6px; }
-
-.versus {
-  align-self: center;
-  color: #617985;
-  font-size: 9px;
-  font-weight: 900;
-}
-
-.ai-progress {
-  display: flex;
-  justify-content: center;
-  gap: 5px;
-  padding-top: 7px;
-}
-
-.ai-progress i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--teal);
-  animation: pulse 900ms infinite alternate;
-}
-
-.ai-progress i:nth-child(2) { animation-delay: 180ms; }
-.ai-progress i:nth-child(3) { animation-delay: 360ms; }
-@keyframes pulse { to { opacity: .2; transform: translateY(-4px); } }
 
 .victory-modal {
   text-align: center;
@@ -1201,9 +1101,6 @@ input:hover {
   .hero h1 { letter-spacing: -.065em; }
   .hero-subtitle { font-size: 17px; }
   .map-meta > span { display: none; }
-  .battle-modal { padding: 23px 17px; gap: 7px; }
-  .dice-side { padding: 9px; }
-  .die { width: 26px; height: 26px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

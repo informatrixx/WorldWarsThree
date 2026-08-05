@@ -66,15 +66,6 @@ function regionBoundary(region, ownerByCell) {
   return segments.join("");
 }
 
-function formatDice(dice) {
-  return dice.map((die) => `
-    <span class="die die-${die.type}" title="${escapeHtml(die.type)}">
-      <img src="${unitAsset(die.type)}" alt="">
-      <b>${die.base}${die.modifier ? `<sup>+${die.modifier}</sup>` : ""}</b>
-    </span>
-  `).join("");
-}
-
 export class GameApp {
   constructor(root) {
     this.root = root;
@@ -83,7 +74,6 @@ export class GameApp {
     this.savedState = this.loadSavedGame();
     this.selectedSource = null;
     this.selectedTarget = null;
-    this.battle = null;
     this.camera = null;
     this.cameraSeed = null;
     this.aiRunning = false;
@@ -437,40 +427,13 @@ export class GameApp {
     return `
       <section class="side-panel log-panel">
         <div class="panel-kicker">${escapeHtml(this.t("battleLog"))}</div>
-        <ol>${this.state.log.slice(0, 12).map((entry) => `<li class="log-${entry.type}">${escapeHtml(this.formatLog(entry))}</li>`).join("")}</ol>
+        <ol>${this.state.log.slice(0, 12).map((entry, index) => `<li class="log-${entry.type} ${index === 0 ? "latest" : ""}">${escapeHtml(this.formatLog(entry))}</li>`).join("")}</ol>
       </section>
     `;
   }
 
-  renderBattleModal() {
-    if (!this.battle) return "";
-    const battle = this.battle;
-    const won = battle.attackerWon;
-    const activeIsHuman = this.state.players[battle.attackerId].isHuman;
-    return `
-      <div class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="battle-title">
-        <div class="battle-modal ${won ? "won" : "lost"}">
-          <div class="panel-kicker">${escapeHtml(this.t("battleReport"))}</div>
-          <h2 id="battle-title">${escapeHtml(this.t(won ? "attackWon" : "attackLost"))}</h2>
-          <div class="dice-side attacker-dice">
-            <span>${escapeHtml(this.t("attacker"))}</span>
-            <div>${formatDice(battle.attackerDice)}</div>
-            <strong>${battle.attackerTotal}</strong>
-          </div>
-          <div class="versus">VS</div>
-          <div class="dice-side defender-dice">
-            <span>${escapeHtml(this.t("defender"))}</span>
-            <div>${formatDice(battle.defenderDice)}</div>
-            <strong>${battle.defenderTotal}</strong>
-          </div>
-          ${activeIsHuman ? `<button class="button button-primary" id="dismiss-battle">${escapeHtml(this.t("continue"))}</button>` : '<div class="ai-progress"><i></i><i></i><i></i></div>'}
-        </div>
-      </div>
-    `;
-  }
-
   renderVictoryModal() {
-    if (this.state.phase !== "finished" || this.battle) return "";
+    if (this.state.phase !== "finished") return "";
     const humanWon = this.state.winnerId === 0;
     return `
       <div class="modal-layer" role="dialog" aria-modal="true">
@@ -534,7 +497,6 @@ export class GameApp {
           </aside>
         </div>
         ${this.toast ? `<div class="toast">${escapeHtml(this.toast)}</div>` : ""}
-        ${this.renderBattleModal()}
         ${this.renderVictoryModal()}
       </main>
     `;
@@ -565,10 +527,6 @@ export class GameApp {
       this.renderGame();
     });
     this.root.querySelector("#end-turn").addEventListener("click", () => this.finishHumanTurn());
-    this.root.querySelector("#dismiss-battle")?.addEventListener("click", () => {
-      this.battle = null;
-      this.renderGame();
-    });
     this.root.querySelector("#back-to-setup")?.addEventListener("click", () => {
       this.clearSave();
       this.renderSetup();
@@ -639,7 +597,7 @@ export class GameApp {
   }
 
   selectRegion(regionId) {
-    if (this.battle || this.state.phase !== "playing") return;
+    if (this.state.phase !== "playing") return;
     const active = getActivePlayer(this.state);
     if (!active.isHuman) return;
     const region = this.state.map.regions[regionId];
@@ -657,9 +615,7 @@ export class GameApp {
 
   performAttack() {
     if (this.selectedSource === null || this.selectedTarget === null) return;
-    const result = resolveAttack(this.state, this.selectedSource, this.selectedTarget);
-    this.state = result.state;
-    this.battle = result.battle;
+    this.state = resolveAttack(this.state, this.selectedSource, this.selectedTarget).state;
     this.selectedSource = null;
     this.selectedTarget = null;
     this.save();
@@ -677,7 +633,7 @@ export class GameApp {
 
   beginAiTurn() {
     this.aiRunning = true;
-    this.aiTimer = window.setTimeout(() => this.runAiStep(0), 520);
+    this.aiTimer = window.setTimeout(() => this.runAiStep(0), 280);
   }
 
   runAiStep(attackCount) {
@@ -689,21 +645,16 @@ export class GameApp {
     if (!choice) {
       this.state = endTurn(this.state);
       this.aiRunning = false;
-      this.battle = null;
       this.save();
       this.renderGame();
       return;
     }
-    const result = resolveAttack(this.state, choice.sourceId, choice.targetId);
-    this.state = result.state;
-    this.battle = result.battle;
+    this.state = resolveAttack(this.state, choice.sourceId, choice.targetId).state;
     this.save();
     this.renderGame();
     this.aiTimer = window.setTimeout(() => {
-      this.battle = null;
-      this.renderGame();
       this.runAiStep(attackCount + 1);
-    }, 780);
+    }, 200);
   }
 
   requestNewGame() {
@@ -735,7 +686,7 @@ export class GameApp {
 
   onKeyDown(event) {
     if (!this.state) return;
-    if (event.key === "Escape" && !this.battle) {
+    if (event.key === "Escape") {
       this.selectedSource = null;
       this.selectedTarget = null;
       this.renderGame();
