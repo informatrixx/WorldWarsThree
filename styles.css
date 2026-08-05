@@ -874,10 +874,10 @@ input:hover {
   z-index: 8;
   display: grid;
   inset: 0;
-  place-items: center;
-  padding: 28px;
+  place-items: end center;
+  padding: 28px 28px 26px;
   pointer-events: none;
-  background: radial-gradient(circle at center, rgba(4, 12, 20, .28), transparent 58%);
+  background: linear-gradient(to top, rgba(4, 12, 20, .38), transparent 34%);
   animation: combat-overlay-life 1100ms both;
 }
 
@@ -931,6 +931,7 @@ input:hover {
   grid-template-columns: minmax(0, 1fr) 105px minmax(0, 1fr);
   align-items: center;
   gap: 16px;
+  transform: translateY(0);
 }
 
 .combat-side {
@@ -1418,7 +1419,7 @@ input:hover {
   .log-panel { max-height: 180px; }
   .end-turn { position: sticky; bottom: 6px; }
 
-  .combat-overlay { padding: 12px; }
+  .combat-overlay { padding: 12px 12px 14px; }
   .turn-notification { top: 46px; min-width: 190px; padding-block: 8px; }
   .combat-roll { width: 100%; grid-template-columns: minmax(0, 1fr) 58px minmax(0, 1fr); gap: 6px; }
   .combat-side { min-height: 118px; padding: 10px 8px; }

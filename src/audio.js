@@ -1,8 +1,8 @@
 export const SOUND_STORAGE_KEY = "dicefront-dominion:sound:v1";
 
-const MASTER_GAIN = 0.68;
-const EFFECT_GAIN = 0.82;
-const AMBIENT_GAIN = 0.12;
+const MASTER_GAIN = 0.78;
+const EFFECT_GAIN = 0.9;
+const AMBIENT_GAIN = 0.22;
 const CLIP_SAMPLE_RATE = 22050;
 
 const CLIP_RECIPES = {
@@ -57,6 +57,9 @@ function createWavBytes(name) {
   const samples = new Float32Array(Math.ceil(recipe.duration * CLIP_SAMPLE_RATE));
   recipe.tones?.forEach((tone) => addTone(samples, ...tone));
   recipe.noise?.forEach((noise, index) => addNoise(samples, ...noise, index + 1));
+  const peak = samples.reduce((maximum, sample) => Math.max(maximum, Math.abs(sample)), 0);
+  const normalization = peak > 0 ? .88 / peak : 1;
+  samples.forEach((sample, index) => { samples[index] = sample * normalization; });
   const bytes = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(bytes);
   const write = (offset, text) => [...text].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
@@ -215,28 +218,34 @@ export class SoundManager {
   startAmbientNodes() {
     if (!this.enabled || !this.matchActive || !this.pageVisible || this.ambientNodes.length) return;
     const now = this.context.currentTime;
-    const wind = this.context.createBufferSource();
-    const windFilter = this.context.createBiquadFilter();
-    const windGain = this.context.createGain();
-    wind.buffer = this.createNoiseBuffer(2.5);
-    wind.loop = true;
-    windFilter.type = "lowpass";
-    windFilter.frequency.value = 720;
-    windGain.gain.value = 0.34;
-    wind.connect(windFilter);
-    windFilter.connect(windGain);
-    windGain.connect(this.ambient);
-    wind.start(now);
+    const drone = this.context.createOscillator();
+    const droneGain = this.context.createGain();
+    drone.type = "triangle";
+    drone.frequency.value = 146.83;
+    droneGain.gain.value = .11;
+    drone.connect(droneGain);
+    droneGain.connect(this.ambient);
 
-    const rumble = this.context.createOscillator();
-    const rumbleGain = this.context.createGain();
-    rumble.type = "sine";
-    rumble.frequency.value = 43;
-    rumbleGain.gain.value = 0.055;
-    rumble.connect(rumbleGain);
-    rumbleGain.connect(this.ambient);
-    rumble.start(now);
-    this.ambientNodes = [wind, windFilter, windGain, rumble, rumbleGain];
+    const fifth = this.context.createOscillator();
+    const fifthGain = this.context.createGain();
+    fifth.type = "sine";
+    fifth.frequency.value = 220;
+    fifthGain.gain.value = .055;
+    fifth.connect(fifthGain);
+    fifthGain.connect(this.ambient);
+
+    const pulse = this.context.createOscillator();
+    const pulseDepth = this.context.createGain();
+    pulse.type = "sine";
+    pulse.frequency.value = .075;
+    pulseDepth.gain.value = .025;
+    pulse.connect(pulseDepth);
+    pulseDepth.connect(droneGain.gain);
+
+    drone.start(now);
+    fifth.start(now);
+    pulse.start(now);
+    this.ambientNodes = [drone, droneGain, fifth, fifthGain, pulse, pulseDepth];
     this.scheduleDistantImpact();
   }
 
@@ -251,7 +260,7 @@ export class SoundManager {
 
   scheduleDistantImpact() {
     if (!this.enabled || !this.matchActive || !this.pageVisible) return;
-    const delay = 6500 + Math.floor(this.random() * 6500);
+    const delay = 8000 + Math.floor(this.random() * 6000);
     this.ambientTimer = this.setTimer(() => {
       this.ambientTimer = null;
       this.playDistantImpact();
@@ -265,10 +274,10 @@ export class SoundManager {
     const oscillator = this.context.createOscillator();
     const gain = this.context.createGain();
     oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(68 + this.random() * 24, now);
-    oscillator.frequency.exponentialRampToValueAtTime(34, now + 1.1);
+    oscillator.frequency.setValueAtTime(118 + this.random() * 28, now);
+    oscillator.frequency.exponentialRampToValueAtTime(52, now + 1.1);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.11, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.25);
     oscillator.connect(gain);
     gain.connect(this.ambient);

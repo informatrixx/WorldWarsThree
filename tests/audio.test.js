@@ -79,6 +79,8 @@ test("sound starts enabled, creates ambience, and persists mute", async () => {
   assert.equal(await manager.unlock(), true);
   assert.equal(manager.context.state, "running");
   assert.ok(manager.ambientNodes.length >= 5);
+  assert.equal(manager.ambientNodes.some((node) => node.kind === "buffer-source"), false, "ambience must be tonal, not a noise loop");
+  assert.ok(manager.ambientNodes.filter((node) => node.kind === "oscillator").length >= 3);
   assert.ok(environment.timers.size >= 1, "distant impact must be scheduled");
 
   await manager.playSelection();
@@ -143,6 +145,10 @@ test("audible effects prefer generated WAV media and clean up their URLs", async
   assert.equal(blobs.length, 2);
   assert.equal(blobs.every((blob) => blob.type === "audio/wav"), true);
   assert.equal(new TextDecoder().decode(blobs[0].parts[0].slice(0, 4)), "RIFF");
+  const clip = new DataView(blobs[0].parts[0]);
+  let peak = 0;
+  for (let offset = 44; offset < clip.byteLength; offset += 2) peak = Math.max(peak, Math.abs(clip.getInt16(offset, true)) / 0x7fff);
+  assert.ok(peak >= .87, "effect clips must be normalized to an audible level");
 
   manager.destroy();
   assert.equal(revoked.length, 2);
