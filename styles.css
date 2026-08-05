@@ -428,9 +428,14 @@ input:hover {
 /* Game shell */
 .game-shell {
   display: grid;
-  min-height: 100vh;
+  width: min(1440px, 100%);
+  height: min(900px, 100dvh);
+  min-height: min(640px, 100dvh);
+  margin-block: max(0px, calc((100dvh - 900px) / 2));
+  margin-inline: auto;
   grid-template-rows: 64px auto minmax(0, 1fr);
   background: #06101a;
+  box-shadow: 0 0 80px rgba(0, 0, 0, .28);
 }
 
 .game-header {
@@ -556,7 +561,7 @@ input:hover {
 .map-stage {
   position: relative;
   min-width: 0;
-  min-height: 520px;
+  min-height: min(520px, calc(100dvh - 118px));
   overflow: hidden;
   background:
     radial-gradient(circle at 48% 45%, rgba(24, 58, 68, 0.5), transparent 55%),
@@ -607,7 +612,7 @@ input:hover {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 520px;
+  min-height: min(520px, calc(100dvh - 118px));
   cursor: grab;
   touch-action: none;
   user-select: none;
