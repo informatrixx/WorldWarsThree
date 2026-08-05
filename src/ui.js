@@ -277,6 +277,15 @@ export class GameApp {
                 <option value="large">${escapeHtml(this.t("large"))}</option>
               </select>
             </label>
+            <label>
+              <span>${escapeHtml(this.t("supplyRate"))}</span>
+              <select name="supplyRate">
+                <option value="low" selected>${escapeHtml(this.t("supplyLow"))}</option>
+                <option value="medium">${escapeHtml(this.t("supplyMedium"))}</option>
+                <option value="high">${escapeHtml(this.t("supplyHigh"))}</option>
+                <option value="veryHigh">${escapeHtml(this.t("supplyVeryHigh"))}</option>
+              </select>
+            </label>
             <div class="form-grid">
               <label>
                 <span>${escapeHtml(this.t("difficulty"))}</span>
@@ -329,6 +338,7 @@ export class GameApp {
         mapSize: data.get("mapSize"),
         difficulty: data.get("difficulty"),
         victoryMode: data.get("victoryMode"),
+        supplyRate: data.get("supplyRate"),
         seed: String(data.get("seed") || "").trim() || randomSeed(),
         locale: this.locale,
       });

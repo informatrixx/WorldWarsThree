@@ -12,6 +12,7 @@ import {
   getLegalAttacks,
   resolveAttack,
   serializeGame,
+  SUPPLY_RATES,
   UNIT_CAP,
   validateGameState,
 } from "../src/core/game.js";
@@ -240,6 +241,24 @@ test("end turn places reinforcements within the unit cap and advances play", () 
   assert.ok(next.map.regions.every((region) => region.units.length <= UNIT_CAP));
 });
 
+test("supply strength scales reinforcements and preserves the low default", () => {
+  const lowState = createGame(gameConfig({ supplyRate: "low", seed: "supply-rate-test" }));
+  const playerId = lowState.players[lowState.turn.activePlayerIndex].id;
+  const lowSupply = calculateReinforcements(lowState, playerId);
+  assert.equal(createGame(gameConfig()).config.supplyRate, "low");
+
+  for (const [supplyRate, multiplier] of Object.entries(SUPPLY_RATES)) {
+    const state = createGame(gameConfig({ supplyRate, seed: "supply-rate-test" }));
+    assert.equal(calculateReinforcements(state, playerId), Math.ceil(lowSupply * multiplier));
+  }
+
+  const highState = createGame(gameConfig({ supplyRate: "veryHigh", seed: "supply-rate-turn" }));
+  const expected = calculateReinforcements(highState, 0);
+  const next = endTurn(highState);
+  assert.equal(next.log.find((entry) => entry.type === "reinforcements").requested, expected);
+  assert.throws(() => createGame(gameConfig({ supplyRate: "unlimited" })), /Unknown supply rate/);
+});
+
 test("AI only chooses legal attacks and can complete its turn", () => {
   let state = createGame(gameConfig());
   state = endTurn(state);
@@ -257,4 +276,10 @@ test("valid games round-trip and invalid save data is rejected", () => {
   assert.deepEqual(restored, state);
   assert.equal(deserializeGame("not json"), null);
   assert.equal(deserializeGame(JSON.stringify({ schemaVersion: 99 })), null);
+  assert.equal(deserializeGame(JSON.stringify({ ...state, config: { ...state.config, supplyRate: "invalid" } })), null);
+  const legacyState = structuredClone(state);
+  delete legacyState.config.supplyRate;
+  const restoredLegacy = deserializeGame(JSON.stringify(legacyState));
+  assert.ok(restoredLegacy);
+  assert.equal(calculateReinforcements(restoredLegacy, 0), calculateReinforcements(state, 0));
 });

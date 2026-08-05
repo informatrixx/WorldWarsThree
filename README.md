@@ -26,6 +26,7 @@ Open `http://localhost:8080` afterwards. There is no build step and there are no
 - Jede Einheit würfelt einen W6. Die höhere Summe gewinnt; Gleichstand gewinnt die Verteidigung.
 - Infanterie verteidigt Wald und Städte, Panzer greifen im Flachland stärker an, Artillerie unterstützt Angriffe.
 - Nach dem Zug werden Verstärkungen anhand der größten verbundenen Gebietsgruppe und kontrollierter Städte verteilt.
+- Die Nachschubstärke ist vor Spielbeginn zwischen dem bisherigen Niveau sowie 1,5×, 2× und 3× wählbar.
 - Wähle zwischen totaler Eroberung und dem Ausschalten gegnerischer Hauptquartiere.
 - Jeder Spieler beginnt mit einem kompakten Heimatkern; die Starttruppen können in Runde 1 kein gegnerisches Hauptquartier erreichen.
 - Partien werden automatisch im Browser gespeichert. Derselbe Seed erzeugt dieselbe Karte.

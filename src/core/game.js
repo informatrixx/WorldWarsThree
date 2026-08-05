@@ -7,6 +7,7 @@ export const UNIT_TYPES = Object.freeze(["infantry", "armor", "artillery"]);
 export const TERRAIN_TYPES = Object.freeze(["plains", "forest", "hills", "city"]);
 export const VICTORY_MODES = Object.freeze(["conquest", "headquarters"]);
 export const DIFFICULTIES = Object.freeze(["easy", "normal", "hard"]);
+export const SUPPLY_RATES = Object.freeze({ low: 1, medium: 1.5, high: 2, veryHigh: 3 });
 
 export const PLAYER_STYLES = Object.freeze([
   { color: "#33b8a6", accent: "#8af2e1", pattern: "diagonal" },
@@ -28,6 +29,7 @@ function normalizeConfig(config = {}) {
   const mapSize = config.mapSize ?? "medium";
   const difficulty = config.difficulty ?? "normal";
   const victoryMode = config.victoryMode ?? "headquarters";
+  const supplyRate = config.supplyRate ?? "low";
   const locale = config.locale === "en" ? "en" : "de";
   if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > 6) {
     throw new RangeError("playerCount must be an integer between 2 and 6");
@@ -35,11 +37,13 @@ function normalizeConfig(config = {}) {
   if (!MAP_SIZES[mapSize]) throw new RangeError(`Unknown map size: ${mapSize}`);
   if (!DIFFICULTIES.includes(difficulty)) throw new RangeError(`Unknown difficulty: ${difficulty}`);
   if (!VICTORY_MODES.includes(victoryMode)) throw new RangeError(`Unknown victory mode: ${victoryMode}`);
+  if (!Object.hasOwn(SUPPLY_RATES, supplyRate)) throw new RangeError(`Unknown supply rate: ${supplyRate}`);
   return {
     playerCount,
     mapSize,
     difficulty,
     victoryMode,
+    supplyRate,
     locale,
     seed: String(config.seed || randomSeed()),
   };
@@ -461,7 +465,9 @@ export function calculateReinforcements(state, playerId) {
   if (!owned.length) return 0;
   const largestGroup = connectedRegionCount(state, playerId);
   const cities = owned.filter((region) => region.terrain === "city").length;
-  return Math.max(1, Math.floor(largestGroup / 3)) + cities;
+  const baseSupply = Math.max(1, Math.floor(largestGroup / 3)) + cities;
+  const multiplier = SUPPLY_RATES[state.config.supplyRate] ?? SUPPLY_RATES.low;
+  return Math.ceil(baseSupply * multiplier);
 }
 
 function distributeReinforcements(state, playerId, rng) {
@@ -558,6 +564,7 @@ export function validateGameState(state) {
   if (state.players.length < 2 || state.players.length > 6) return false;
   if (!Number.isInteger(state.turn?.activePlayerIndex)) return false;
   if (!state.players[state.turn.activePlayerIndex]) return false;
+  if (state.config.supplyRate !== undefined && !Object.hasOwn(SUPPLY_RATES, state.config.supplyRate)) return false;
   return state.map.regions.every((region, index) => (
     region.id === index
     && Array.isArray(region.neighbors)
