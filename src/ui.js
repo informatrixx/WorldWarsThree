@@ -1,17 +1,21 @@
-import { chooseAiAttack } from "./core/ai.js";
+import { chooseAiAttack, playAiCards } from "./core/ai.js";
 import { SoundManager } from "./audio.js";
 import {
   calculateReinforcements,
   createGame,
   deserializeGame,
+  discardCard,
   endTurn,
   getActivePlayer,
   getBattleModifierSummary,
+  getLegalCardTargets,
   getLegalTargets,
+  playCard,
+  requiresCardDiscard,
   resolveAttack,
   serializeGame,
 } from "./core/game.js";
-import { cellKey, getHexPoints } from "./core/map-generator.js";
+import { cellKey, getCellCenter, getHexPoints } from "./core/map-generator.js";
 import { randomSeed } from "./core/random.js";
 import { playerName, translate } from "./i18n.js";
 
@@ -22,6 +26,14 @@ const TURN_NOTIFICATION_MS = 900;
 const HEX_DIRECTIONS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 const EDGE_CORNERS = [[0, 1], [5, 0], [4, 5], [3, 4], [2, 3], [1, 2]];
 const DIE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+const CARD_ICONS = Object.freeze({
+  supplyDrop: "✚",
+  redeploy: "⇄",
+  fireSupport: "✦",
+  fortification: "◆",
+  luckyRoll: "⚄",
+  mobilization: "⬡",
+});
 
 function escapeHtml(value) {
   return String(value)
@@ -53,22 +65,7 @@ function unitAsset(type) {
   return `assets/units/${type}.png`;
 }
 
-function renderUnitStack(units) {
-  const order = { infantry: 0, armor: 1, artillery: 2 };
-  const sorted = [...units].sort((first, second) => order[first] - order[second]);
-  const rows = sorted.length > 4
-    ? [sorted.slice(0, Math.ceil(sorted.length / 2)), sorted.slice(Math.ceil(sorted.length / 2))]
-    : [sorted];
-  return rows.map((row, rowIndex) => {
-    const y = rows.length === 1 ? -34 : rowIndex === 0 ? -43 : -25;
-    return row.map((type, columnIndex) => {
-      const centerX = (columnIndex - (row.length - 1) / 2) * 12;
-      return `<image class="map-unit-sprite unit-${type}" data-stack-row="${rowIndex}" href="${unitAsset(type)}" x="${number(centerX - 17)}" y="${y}" width="34" height="34" preserveAspectRatio="xMidYMid meet"/>`;
-    }).join("");
-  }).join("");
-}
-
-function renderTerrainBadge(terrain, label) {
+function renderTerrainToken(terrain, label) {
   const shapes = {
     plains: '<path d="M-6 4H6M-5 0H4M-3-4H6"/>',
     forest: '<path d="M0-7-5-1h3l-4 5h5v4h2V4h5L2-1h3z"/>',
@@ -76,11 +73,40 @@ function renderTerrainBadge(terrain, label) {
     city: '<path d="M-6 5V-2h4V5M0 5V-6h5V5M-7 5H7M2-3h1M2 0h1"/>',
   };
   return `
-    <g class="terrain-badge" transform="translate(-25 6)" aria-hidden="true">
+    <g class="token-terrain" transform="translate(-17 -13) scale(.72)" aria-hidden="true">
       <title>${escapeHtml(label)}</title>
-      <circle r="11"/>
-      <g class="terrain-badge-shape">${shapes[terrain] ?? shapes.plains}</g>
+      <rect x="-10" y="-10" width="20" height="20" rx="5"/>
+      <g class="terrain-token-shape">${shapes[terrain] ?? shapes.plains}</g>
     </g>
+  `;
+}
+
+function renderForceComposition(units) {
+  const counts = unitCounts(units);
+  const entries = ["infantry", "armor", "artillery"]
+    .filter((type) => counts[type] > 0);
+  return entries.map((type, index) => {
+    const x = (index - (entries.length - 1) / 2) * 16;
+    return `
+      <g class="force-type force-${type}" transform="translate(${number(x)} 12)">
+        <use href="#unit-glyph-${type}" x="-7" y="-7" width="14" height="14"/>
+        <text class="force-count" x="7" y="7">${counts[type]}</text>
+      </g>
+    `;
+  }).join("");
+}
+
+function renderUnitGlyphDefinitions() {
+  return `
+    <symbol id="unit-glyph-infantry" viewBox="-8 -8 16 16">
+      <circle cx="0" cy="-3.2" r="2.5"/><path d="M-4 7V3.5Q-4 0 0 0t4 3.5V7M-2.5 3.5h5"/>
+    </symbol>
+    <symbol id="unit-glyph-armor" viewBox="-8 -8 16 16">
+      <path d="M-6 1h12l1.2 4H-7.2zM-3.5 1l1-3.5h5L4 1M1-2.5l5-2M-5.5 6.5h11"/>
+    </symbol>
+    <symbol id="unit-glyph-artillery" viewBox="-8 -8 16 16">
+      <path d="M-5 3h8l2 3H-6zM0 3 2-1M1-1l6-4M-3 6.5a1.5 1.5 0 1 0 0-3M4 6.5a1.5 1.5 0 1 0 0-3"/>
+    </symbol>
   `;
 }
 
@@ -99,9 +125,25 @@ function regionBoundary(region, ownerByCell) {
   return segments.join("");
 }
 
+function regionMarkerCenter(region) {
+  if (!region.cells?.length) return region.center;
+  const owned = new Set(region.cells.map((cell) => cellKey(cell.q, cell.r)));
+  return region.cells.map((cell) => {
+    const center = getCellCenter(cell.q, cell.r);
+    const friendlyNeighbors = HEX_DIRECTIONS.filter(([dq, dr]) => (
+      owned.has(cellKey(cell.q + dq, cell.r + dr))
+    )).length;
+    const centroidDistance = (center.x - region.center.x) ** 2 + (center.y - region.center.y) ** 2;
+    return { center, friendlyNeighbors, centroidDistance };
+  }).sort((first, second) => (
+    second.friendlyNeighbors - first.friendlyNeighbors
+    || first.centroidDistance - second.centroidDistance
+  ))[0].center;
+}
+
 function renderCombatDice(dice) {
   return dice.map((die, index) => `
-    <span class="combat-die" style="--die-index:${index}" title="${escapeHtml(die.type)}">
+    <span class="combat-die ${die.rerolls ? "rerolled" : ""}" style="--die-index:${index}" title="${escapeHtml(die.type)}">
       <b>${DIE_FACES[die.base - 1]}</b>${die.modifier ? `<sup>+${die.modifier}</sup>` : ""}
     </span>
   `).join("");
@@ -115,6 +157,8 @@ export class GameApp {
     this.savedState = this.loadSavedGame();
     this.selectedSource = null;
     this.selectedTarget = null;
+    this.selectedCardId = null;
+    this.cardSource = null;
     this.camera = null;
     this.cameraSeed = null;
     this.aiRunning = false;
@@ -245,6 +289,8 @@ export class GameApp {
     this.state = null;
     this.selectedSource = null;
     this.selectedTarget = null;
+    this.selectedCardId = null;
+    this.cardSource = null;
     this.camera = null;
     this.root.innerHTML = `
       <main class="setup-shell">
@@ -312,6 +358,11 @@ export class GameApp {
                 </select>
               </label>
             </div>
+            <label class="toggle-field">
+              <span><strong>${escapeHtml(this.t("tacticalCards"))}</strong><small>${escapeHtml(this.t("tacticalCardsHint"))}</small></span>
+              <input type="checkbox" name="cardsEnabled" checked>
+              <i aria-hidden="true"></i>
+            </label>
             <label>
               <span>${escapeHtml(this.t("seed"))}</span>
               <div class="seed-field">
@@ -348,6 +399,7 @@ export class GameApp {
         difficulty: data.get("difficulty"),
         victoryMode: data.get("victoryMode"),
         supplyRate: data.get("supplyRate"),
+        cardsEnabled: data.get("cardsEnabled") === "on",
         seed: String(data.get("seed") || "").trim() || randomSeed(),
         locale: this.locale,
       });
@@ -372,6 +424,19 @@ export class GameApp {
     this.cameraSeed = this.state.config.seed;
   }
 
+  mapDetailClass() {
+    if (!this.camera || !this.state?.map?.bounds?.width) return "map-detail-overview";
+    return this.camera.width / this.state.map.bounds.width <= 0.82
+      ? "map-detail-tactical"
+      : "map-detail-overview";
+  }
+
+  syncMapDetailClass(svg) {
+    const tactical = this.mapDetailClass() === "map-detail-tactical";
+    svg.classList.toggle("map-detail-tactical", tactical);
+    svg.classList.toggle("map-detail-overview", !tactical);
+  }
+
   playerStats(player) {
     const regions = this.state.map.regions.filter((region) => region.ownerId === player.id);
     return {
@@ -394,6 +459,7 @@ export class GameApp {
               <span class="player-metrics">
                 <span title="${escapeHtml(this.t("territories", { count: stats.regions }))}"><b>${stats.regions}</b><small>${escapeHtml(this.t("territoryMetric"))}</small></span>
                 <span class="supply" title="${escapeHtml(this.t("reinforcementPreview", { count: stats.reinforcements }))}"><b>+${stats.reinforcements}</b><small>${escapeHtml(this.t("supplyMetric"))}</small></span>
+                ${this.state.config.cardsEnabled ? `<span class="card-count" title="${escapeHtml(this.t("cardCount", { count: player.hand.length }))}"><b>${player.hand.length}</b><small>${escapeHtml(this.t("cardsMetric"))}</small></span>` : ""}
               </span>
             ` : `<small class="eliminated-label">${escapeHtml(this.t("eliminated"))}</small>`}
           </span>
@@ -415,7 +481,7 @@ export class GameApp {
       <pattern id="player-pattern-${player.id}" width="12" height="12" patternUnits="userSpaceOnUse">
         <g fill="none" stroke="${player.style.accent}" stroke-width="1.1" opacity=".5">${patterns[index]}</g>
       </pattern>
-    `).join("");
+    `).join("") + renderUnitGlyphDefinitions();
   }
 
   renderMap() {
@@ -423,10 +489,17 @@ export class GameApp {
     this.state.map.regions.forEach((region) => region.cells.forEach((cell) => {
       ownerByCell.set(cellKey(cell.q, cell.r), region.id);
     }));
-    const legalTargets = this.selectedSource === null ? [] : getLegalTargets(this.state, this.selectedSource);
+    const cardTargets = this.selectedCardId === null
+      ? []
+      : getLegalCardTargets(this.state, this.selectedCardId, { sourceId: this.cardSource });
+    const cardTargetSet = new Set(cardTargets);
+    const legalTargets = this.selectedCardId !== null || this.selectedSource === null
+      ? []
+      : getLegalTargets(this.state, this.selectedSource);
     const legalTargetSet = new Set(legalTargets);
     const regions = this.state.map.regions.map((region) => {
       const player = this.state.players[region.ownerId];
+      const markerCenter = regionMarkerCenter(region);
       const points = region.cells.map((cell) => {
         const polygon = getHexPoints(cell.q, cell.r).map((point) => `${number(point.x)},${number(point.y)}`).join(" ");
         return `<polygon points="${polygon}" class="region-cell"/><polygon points="${polygon}" class="region-pattern"/>`;
@@ -436,7 +509,9 @@ export class GameApp {
         ? getBattleModifierSummary(this.state, this.selectedSource, region.id)
         : null;
       if (region.isHeadquarters) classes.push("headquarters");
-      if (region.id === this.selectedSource) classes.push("selected-source");
+      if (region.id === this.cardSource) classes.push("selected-card-source");
+      else if (cardTargetSet.has(region.id)) classes.push("card-target");
+      else if (region.id === this.selectedSource) classes.push("selected-source");
       else if (legalTargetSet.has(region.id)) classes.push("legal-target");
       if (this.selectedSource === null && region.id === this.combatAnimation?.battle.sourceId) classes.push("combat-source");
       if (this.selectedSource === null && region.id === this.combatAnimation?.battle.targetId) classes.push("combat-target");
@@ -448,29 +523,78 @@ export class GameApp {
         units: this.t("units", { count: region.units.length }),
       });
       if (modifier) label += `, ${this.t("ariaModifier", { value: signedModifier(modifier.netBonus) })}`;
+      const effects = (this.state.cards?.effects ?? []).filter((effect) => effect.regionId === region.id);
+      const effectCounts = effects.reduce((counts, effect) => {
+        counts[effect.type] = (counts[effect.type] ?? 0) + 1;
+        return counts;
+      }, {});
+      const effectMarkers = Object.entries(effectCounts).map(([type, count], index) => `
+        <g class="card-effect effect-${type}" transform="translate(27 ${number(-12 + index * 13)})">
+          <circle r="6.5"/><text y="2.6">${CARD_ICONS[type] ?? "◆"}</text>${count > 1 ? `<text class="effect-count" x="5.5" y="-4.5">${count}</text>` : ""}
+        </g>
+      `).join("");
       return `
         <g class="region terrain-${region.terrain} ${selectedClass}" data-region-id="${region.id}" tabindex="0" role="button"
           aria-label="${escapeHtml(label)}" style="--region-color:${player.style.color};--region-accent:${player.style.accent};--pattern:url(#player-pattern-${player.id})">
           ${points}
           <path class="region-boundary" d="${regionBoundary(region, ownerByCell)}"/>
-          <g class="region-marker" transform="translate(${number(region.center.x)} ${number(region.center.y)})">
-            <g class="map-unit-stack">${renderUnitStack(region.units)}</g>
-            ${renderTerrainBadge(region.terrain, this.t(region.terrain))}
-            <circle class="unit-count-badge" cx="22" cy="9" r="10"/>
-            <text class="unit-total" x="22" y="13">${region.units.length}</text>
-            ${region.isHeadquarters ? '<g class="hq-emblem"><circle class="hq-halo" cx="0" cy="-46" r="16"/><path class="hq-marker" d="M-16-53 0-61 16-53 13-36 0-30-13-36Z"/><path class="hq-star" d="M0-56 3-50 10-49 5-44 6-37 0-40-6-37-5-44-10-49-3-50Z"/><text class="hq-label" x="0" y="-45">HQ</text></g>' : ""}
-            ${modifier ? `<g class="combat-modifier modifier-${modifier.netBonus > 0 ? "positive" : modifier.netBonus < 0 ? "negative" : "neutral"}" transform="translate(0 49)"><rect x="-15" y="-7" width="30" height="14" rx="5"/><text y="3">${signedModifier(modifier.netBonus)}</text></g>` : ""}
+          <g class="region-marker" transform="translate(${number(markerCenter.x)} ${number(markerCenter.y)})">
+            <g class="territory-token">
+              <rect class="territory-token-bg" x="-25" y="-23" width="50" height="46" rx="11"/>
+              ${renderTerrainToken(region.terrain, this.t(region.terrain))}
+              <text class="unit-total" x="4" y="-4">${region.units.length}</text>
+              <g class="force-composition">${renderForceComposition(region.units)}</g>
+              ${region.isHeadquarters ? '<g class="hq-token"><rect x="-14" y="-29" width="28" height="11" rx="4"/><text y="-21">HQ</text></g>' : ""}
+              <g class="card-effect-markers">${effectMarkers}</g>
+              ${modifier ? `<g class="combat-modifier modifier-${modifier.netBonus > 0 ? "positive" : modifier.netBonus < 0 ? "negative" : "neutral"}" transform="translate(0 31)"><rect x="-15" y="-7" width="30" height="14" rx="5"/><text y="3">${signedModifier(modifier.netBonus)}</text></g>` : ""}
+            </g>
           </g>
         </g>
       `;
     }).join("");
     const viewBox = `${number(this.camera.x)} ${number(this.camera.y)} ${number(this.camera.width)} ${number(this.camera.height)}`;
     return `
-      <svg id="battle-map" viewBox="${viewBox}" aria-label="${escapeHtml(this.t("ariaMap"))}" role="application">
+      <svg id="battle-map" class="${this.mapDetailClass()}" viewBox="${viewBox}" aria-label="${escapeHtml(this.t("ariaMap"))}" role="application">
         <defs>${this.renderPatternDefinitions()}</defs>
         <rect class="map-background" x="${this.state.map.bounds.x - 1000}" y="${this.state.map.bounds.y - 1000}" width="${this.state.map.bounds.width + 2000}" height="${this.state.map.bounds.height + 2000}"/>
         <g class="map-regions">${regions}</g>
       </svg>
+    `;
+  }
+
+  renderCardsPanel() {
+    if (!this.state.config.cardsEnabled) return "";
+    const human = this.state.players.find((player) => player.isHuman);
+    const active = getActivePlayer(this.state);
+    const overflow = active.isHuman && requiresCardDiscard(this.state);
+    const selected = human.hand.find((card) => card.id === this.selectedCardId);
+    const instruction = overflow
+      ? this.t("discardCardPrompt")
+      : selected
+        ? this.t(selected.type === "redeploy" && this.cardSource === null ? "selectCardSource" : "selectCardTarget")
+        : this.t("cardsHint");
+    return `
+      <section class="side-panel cards-panel ${overflow ? "cards-overflow" : ""}">
+        <div class="cards-heading"><div class="panel-kicker">${escapeHtml(this.t("tacticalCards"))}</div><span>${human.hand.length}/3</span></div>
+        <p class="card-instruction">${escapeHtml(instruction)}</p>
+        <div class="card-hand">
+          ${human.hand.map((card) => {
+            const playable = getLegalCardTargets(this.state, card.id).length > 0;
+            const rare = ["luckyRoll", "mobilization"].includes(card.type);
+            return `
+              <article class="tactical-card ${rare ? "rare" : "common"} ${this.selectedCardId === card.id ? "selected" : ""} ${!playable ? "unplayable" : ""}">
+                <button type="button" class="card-play" data-card-id="${escapeHtml(card.id)}" ${active.isHuman && !overflow && playable ? "" : "disabled"}
+                  title="${escapeHtml(this.t(`${card.type}Description`))}">
+                  <span class="card-icon" aria-hidden="true">${CARD_ICONS[card.type]}</span>
+                  <span><strong>${escapeHtml(this.t(card.type))}</strong><small>${escapeHtml(this.t(rare ? "rareCard" : "commonCard"))}</small></span>
+                </button>
+                ${overflow ? `<button type="button" class="card-discard" data-discard-card="${escapeHtml(card.id)}" title="${escapeHtml(this.t("discardCard"))}" aria-label="${escapeHtml(this.t("discardNamedCard", { card: this.t(card.type) }))}">×</button>` : ""}
+              </article>
+            `;
+          }).join("") || `<p class="empty-hand">${escapeHtml(this.t("emptyHand"))}</p>`}
+        </div>
+        ${selected ? `<button type="button" class="text-button" id="cancel-card">× ${escapeHtml(this.t("cancelCard"))}</button>` : ""}
+      </section>
     `;
   }
 
@@ -488,7 +612,10 @@ export class GameApp {
       return `
         <div class="region-summary" style="--player:${player.style.color}">
           <span class="summary-label">${escapeHtml(label)}</span>
-          <div><strong>${escapeHtml(this.t("region", { id: region.id + 1 }))}</strong>${region.isHeadquarters ? `<b class="tag">${this.t("headquartersShort")}</b>` : ""}</div>
+          <div>
+            <strong>${escapeHtml(this.t("region", { id: region.id + 1 }))}</strong>
+            <span class="summary-meta"><b class="summary-strength" title="${escapeHtml(this.t("units", { count: region.units.length }))}">${region.units.length}</b>${region.isHeadquarters ? `<b class="tag">${this.t("headquartersShort")}</b>` : ""}</span>
+          </div>
           <small>${escapeHtml(playerName(this.state, player.id, this.locale))} · ${escapeHtml(this.t(region.terrain))}</small>
           <div class="unit-breakdown">
             <span title="${escapeHtml(this.t("infantry"))}"><img src="${unitAsset("infantry")}" alt="">${counts.infantry}</span>
@@ -522,6 +649,17 @@ export class GameApp {
     if (entry.type === "reinforcements") return this.t("logReinforcements", {
       player: playerName(this.state, entry.playerId, this.locale), amount: entry.amount,
     });
+    if (entry.type === "cardDrawn") return this.state.players[entry.playerId].isHuman
+      ? this.t("logCardDrawn", { card: this.t(entry.cardType) })
+      : this.t("logCardDrawnHidden", { player: playerName(this.state, entry.playerId, this.locale) });
+    if (entry.type === "cardPlayed") return this.t("logCardPlayed", {
+      player: playerName(this.state, entry.playerId, this.locale),
+      card: this.t(entry.cardType),
+      target: entry.targetId === undefined ? entry.sourceId + 1 : entry.targetId + 1,
+    });
+    if (entry.type === "cardDiscarded") return this.state.players[entry.playerId].isHuman
+      ? this.t("logCardDiscarded", { card: this.t(entry.cardType) })
+      : this.t("logCardDiscardedHidden", { player: playerName(this.state, entry.playerId, this.locale) });
     if (entry.type === "turnStarted") return this.t("logTurn", {
       player: playerName(this.state, entry.playerId, this.locale), round: entry.round,
     });
@@ -556,7 +694,7 @@ export class GameApp {
           <div class="combat-side combat-attacker" style="--combat-color:${attacker.style.color}">
             <span>${escapeHtml(this.t("attacker"))}</span>
             <div class="combat-dice">${renderCombatDice(battle.attackerDice)}</div>
-            <strong class="combat-total">${battle.attackerTotal}</strong>
+            <strong class="combat-total">${battle.attackerTotal}${battle.attackerCardBonus ? `<small>+${battle.attackerCardBonus} ${CARD_ICONS.fireSupport}</small>` : ""}${battle.luckyRerolls ? `<small>${CARD_ICONS.luckyRoll} ×${battle.luckyRerolls}</small>` : ""}</strong>
           </div>
           <div class="combat-outcome ${battle.attackerWon ? "won" : "lost"}">
             <i>VS</i>
@@ -565,7 +703,7 @@ export class GameApp {
           <div class="combat-side combat-defender" style="--combat-color:${defender.style.color}">
             <span>${escapeHtml(this.t("defender"))}</span>
             <div class="combat-dice">${renderCombatDice(battle.defenderDice)}</div>
-            <strong class="combat-total">${battle.defenderTotal}</strong>
+            <strong class="combat-total">${battle.defenderTotal}${battle.defenderCardBonus ? `<small>+${battle.defenderCardBonus} ${CARD_ICONS.fortification}</small>` : ""}</strong>
           </div>
         </div>
       </div>
@@ -644,6 +782,7 @@ export class GameApp {
             </div>
           </section>
           <aside class="game-sidebar">
+            ${this.renderCardsPanel()}
             ${this.selectedRegionPanel()}
             <section class="side-panel help-panel">
               <div class="panel-kicker">${escapeHtml(this.t("helpTitle"))}</div>
@@ -653,7 +792,7 @@ export class GameApp {
               </div>
             </section>
             ${this.renderLog()}
-            <button class="button button-primary end-turn" id="end-turn" ${humanTurn && !this.combatAnimation ? "" : "disabled"}>${escapeHtml(this.t("endTurn"))}<span>→</span></button>
+            <button class="button button-primary end-turn" id="end-turn" ${humanTurn && !this.combatAnimation && !requiresCardDiscard(this.state) ? "" : "disabled"}>${escapeHtml(this.t("endTurn"))}<span>→</span></button>
           </aside>
         </div>
         ${this.toast ? `<div class="toast">${escapeHtml(this.toast)}</div>` : ""}
@@ -687,6 +826,27 @@ export class GameApp {
       this.selectedTarget = null;
       this.renderGame();
     });
+    this.root.querySelectorAll("[data-card-id]").forEach((button) => button.addEventListener("click", () => {
+      this.selectedCardId = this.selectedCardId === button.dataset.cardId ? null : button.dataset.cardId;
+      this.cardSource = null;
+      this.selectedSource = null;
+      this.selectedTarget = null;
+      this.playSound(this.audio.playSelection());
+      this.renderGame();
+    }));
+    this.root.querySelectorAll("[data-discard-card]").forEach((button) => button.addEventListener("click", () => {
+      this.state = discardCard(this.state, button.dataset.discardCard);
+      this.selectedCardId = null;
+      this.cardSource = null;
+      this.playSound(this.audio.playCard());
+      this.save();
+      this.renderGame();
+    }));
+    this.root.querySelector("#cancel-card")?.addEventListener("click", () => {
+      this.selectedCardId = null;
+      this.cardSource = null;
+      this.renderGame();
+    });
     this.root.querySelector("#end-turn").addEventListener("click", () => this.finishHumanTurn());
     this.root.querySelector("#back-to-setup")?.addEventListener("click", () => {
       this.audio.setMatchActive(false);
@@ -710,6 +870,7 @@ export class GameApp {
       event.preventDefault();
       this.zoomCamera(event.deltaY < 0 ? 1.13 : 0.885, event.clientX, event.clientY, false);
       svg.setAttribute("viewBox", `${number(this.camera.x)} ${number(this.camera.y)} ${number(this.camera.width)} ${number(this.camera.height)}`);
+      this.syncMapDetailClass(svg);
     }, { passive: false });
 
     let drag = null;
@@ -762,6 +923,20 @@ export class GameApp {
     if (this.state.phase !== "playing") return;
     const active = getActivePlayer(this.state);
     if (!active.isHuman) return;
+    if (requiresCardDiscard(this.state)) return;
+    if (this.selectedCardId !== null) {
+      const legalTargets = getLegalCardTargets(this.state, this.selectedCardId, { sourceId: this.cardSource });
+      if (!legalTargets.includes(regionId)) return;
+      const card = active.hand.find((entry) => entry.id === this.selectedCardId);
+      if (card?.type === "redeploy" && this.cardSource === null) {
+        this.cardSource = regionId;
+        this.playSound(this.audio.playSelection());
+        this.renderGame();
+        return;
+      }
+      this.performCard(regionId);
+      return;
+    }
     const region = this.state.map.regions[regionId];
     if (region.ownerId === active.id) {
       if (region.units.length < 2) return;
@@ -777,6 +952,24 @@ export class GameApp {
     this.renderGame();
   }
 
+  performCard(regionId) {
+    if (this.selectedCardId === null) return;
+    const card = getActivePlayer(this.state).hand.find((entry) => entry.id === this.selectedCardId);
+    const selection = card?.type === "redeploy"
+      ? { sourceId: this.cardSource, targetId: regionId }
+      : { targetId: regionId };
+    const played = playCard(this.state, this.selectedCardId, selection);
+    this.state = played.state;
+    this.selectedCardId = null;
+    this.cardSource = null;
+    this.selectedTarget = null;
+    this.selectedSource = ["fireSupport", "luckyRoll"].includes(played.result.cardType)
+      && getLegalTargets(this.state, regionId).length ? regionId : null;
+    this.playSound(this.audio.playCard());
+    this.save();
+    this.renderGame();
+  }
+
   performAttack() {
     if (this.selectedSource === null || this.selectedTarget === null) return;
     const result = resolveAttack(this.state, this.selectedSource, this.selectedTarget);
@@ -788,9 +981,11 @@ export class GameApp {
   }
 
   finishHumanTurn() {
-    if (!getActivePlayer(this.state).isHuman || this.state.phase !== "playing" || this.combatAnimation) return;
+    if (!getActivePlayer(this.state).isHuman || this.state.phase !== "playing" || this.combatAnimation || requiresCardDiscard(this.state)) return;
     this.selectedSource = null;
     this.selectedTarget = null;
+    this.selectedCardId = null;
+    this.cardSource = null;
     this.playSound(this.audio.playEndTurn());
     this.state = endTurn(this.state);
     this.save();
@@ -806,6 +1001,12 @@ export class GameApp {
     if (!this.state || this.state.phase !== "playing" || getActivePlayer(this.state).isHuman) {
       this.aiRunning = false;
       return;
+    }
+    if (attackCount === 0) {
+      const cards = playAiCards(this.state);
+      this.state = cards.state;
+      if (cards.played || cards.discarded) this.playSound(this.audio.playCard());
+      this.save();
     }
     const choice = chooseAiAttack(this.state, attackCount);
     if (!choice) {
@@ -850,6 +1051,7 @@ export class GameApp {
     const active = getActivePlayer(this.state);
     this.turnNotification = { playerId: active.id, round: this.state.turn.round };
     this.playSound(this.audio.playTurnStart(active.isHuman));
+    if (this.state.config.cardsEnabled) this.playSound(this.audio.playCardDraw());
     this.renderGame();
     this.turnNotificationTimer = window.setTimeout(() => {
       this.turnNotification = null;
@@ -897,6 +1099,8 @@ export class GameApp {
     if (event.key === "Escape") {
       this.selectedSource = null;
       this.selectedTarget = null;
+      this.selectedCardId = null;
+      this.cardSource = null;
       this.renderGame();
     }
     if (event.key.toLowerCase() === "f" && !event.ctrlKey && !event.metaKey) {

@@ -1,13 +1,30 @@
 import { generateMap, MAP_SIZES } from "./map-generator.js";
 import { randomSeed, SeededRandom } from "./random.js";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const UNIT_CAP = 8;
 export const UNIT_TYPES = Object.freeze(["infantry", "armor", "artillery"]);
 export const TERRAIN_TYPES = Object.freeze(["plains", "forest", "hills", "city"]);
 export const VICTORY_MODES = Object.freeze(["conquest", "headquarters"]);
 export const DIFFICULTIES = Object.freeze(["easy", "normal", "hard"]);
 export const SUPPLY_RATES = Object.freeze({ low: 1, medium: 1.5, high: 2, veryHigh: 3 });
+export const CARD_TYPES = Object.freeze([
+  "supplyDrop",
+  "redeploy",
+  "fireSupport",
+  "fortification",
+  "luckyRoll",
+  "mobilization",
+]);
+export const CARD_HAND_LIMIT = 3;
+export const CARD_DECK_COUNTS = Object.freeze({
+  supplyDrop: 6,
+  redeploy: 6,
+  fireSupport: 6,
+  fortification: 6,
+  luckyRoll: 3,
+  mobilization: 3,
+});
 
 export const PLAYER_STYLES = Object.freeze([
   { color: "#33b8a6", accent: "#8af2e1", pattern: "diagonal" },
@@ -30,6 +47,7 @@ function normalizeConfig(config = {}) {
   const difficulty = config.difficulty ?? "normal";
   const victoryMode = config.victoryMode ?? "headquarters";
   const supplyRate = config.supplyRate ?? "low";
+  const cardsEnabled = config.cardsEnabled === undefined ? true : Boolean(config.cardsEnabled);
   const locale = config.locale === "en" ? "en" : "de";
   if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > 6) {
     throw new RangeError("playerCount must be an integer between 2 and 6");
@@ -44,9 +62,45 @@ function normalizeConfig(config = {}) {
     difficulty,
     victoryMode,
     supplyRate,
+    cardsEnabled,
     locale,
     seed: String(config.seed || randomSeed()),
   };
+}
+
+function createCardState(rng, enabled) {
+  if (!enabled) return { drawPile: [], discardPile: [], effects: [] };
+  const cards = CARD_TYPES.flatMap((type) => Array.from(
+    { length: CARD_DECK_COUNTS[type] },
+    (_, index) => ({ id: `${type}-${index + 1}`, type }),
+  ));
+  return { drawPile: rng.shuffle(cards), discardPile: [], effects: [] };
+}
+
+function drawCard(state, playerId, rng) {
+  if (!state.config.cardsEnabled) return null;
+  const player = state.players[playerId];
+  if (!player?.active || player.hand.length > CARD_HAND_LIMIT) return null;
+  if (!state.cards.drawPile.length && state.cards.discardPile.length) {
+    state.cards.drawPile = rng.shuffle(state.cards.discardPile);
+    state.cards.discardPile = [];
+  }
+  const card = state.cards.drawPile.pop();
+  if (!card) return null;
+  player.hand.push(card);
+  return card;
+}
+
+function randomUnit(rng) {
+  return rng.weighted([
+    { type: "infantry", weight: 0.5 },
+    { type: "armor", weight: 0.3 },
+    { type: "artillery", weight: 0.2 },
+  ]).type;
+}
+
+export function requiresCardDiscard(state) {
+  return Boolean(state.config.cardsEnabled && getActivePlayer(state).hand.length > CARD_HAND_LIMIT);
 }
 
 function regionDistanceMatrix(regions) {
@@ -263,23 +317,28 @@ export function createGame(inputConfig = {}) {
     isHuman: index === 0,
     active: true,
     headquartersRegionId: null,
+    hand: [],
   }));
   const regionDistances = assignOwnersAndHeadquarters(map.regions, players, rng);
   assignBalancedTerrain(map.regions, players, rng);
   const startingUnitBudget = assignBalancedUnits(map.regions, players, regionDistances, rng);
-
-  return {
+  const state = {
     schemaVersion: SCHEMA_VERSION,
     config,
     map,
     players,
     startingUnitBudget,
-    rngState: rng.state,
+    rngState: 0,
+    cards: createCardState(rng, config.cardsEnabled),
     turn: { round: 1, activePlayerIndex: 0 },
     phase: "playing",
     winnerId: null,
     log: [{ type: "gameStarted", round: 1, seed: config.seed }],
   };
+  const drawn = drawCard(state, 0, rng);
+  if (drawn) state.log.unshift({ type: "cardDrawn", playerId: 0, cardType: drawn.type, round: 1 });
+  state.rngState = rng.state;
+  return state;
 }
 
 export function getActivePlayer(state) {
@@ -294,8 +353,12 @@ export function getLegalTargets(state, sourceId) {
     || !source
     || source.ownerId !== activePlayer.id
     || source.units.length < 2
+    || requiresCardDiscard(state)
   ) return [];
-  return source.neighbors.filter((id) => state.map.regions[id].ownerId !== activePlayer.id);
+  return source.neighbors.filter((id) => (
+    state.map.regions[id].ownerId !== activePlayer.id
+    && !(state.turn.round === 1 && state.map.regions[id].isHeadquarters)
+  ));
 }
 
 export function getLegalAttacks(state) {
@@ -306,6 +369,151 @@ export function getLegalAttacks(state) {
     }
   }
   return attacks;
+}
+
+function findHandCard(state, cardId) {
+  return getActivePlayer(state).hand.find((card) => card.id === cardId);
+}
+
+function ownedRegions(state) {
+  const playerId = getActivePlayer(state).id;
+  return state.map.regions.filter((region) => region.ownerId === playerId);
+}
+
+export function getLegalCardTargets(state, cardId, selection = {}) {
+  if (!state.config.cardsEnabled || state.phase !== "playing" || requiresCardDiscard(state)) return [];
+  const card = findHandCard(state, cardId);
+  if (!card) return [];
+  const owned = ownedRegions(state);
+  if (card.type === "supplyDrop") {
+    return owned.filter((region) => region.units.length < UNIT_CAP).map((region) => region.id);
+  }
+  if (["fireSupport", "luckyRoll"].includes(card.type)) {
+    return owned.filter((region) => getLegalTargets(state, region.id).length).map((region) => region.id);
+  }
+  if (card.type === "fortification") return owned.map((region) => region.id);
+  if (card.type === "mobilization") {
+    return owned.filter((region) => (
+      [region.id, ...region.neighbors].some((id) => (
+        state.map.regions[id].ownerId === region.ownerId
+        && state.map.regions[id].units.length < UNIT_CAP
+      ))
+    )).map((region) => region.id);
+  }
+  if (card.type === "redeploy") {
+    if (selection.sourceId !== undefined && selection.sourceId !== null) {
+      const source = state.map.regions[selection.sourceId];
+      if (!source || source.ownerId !== getActivePlayer(state).id || source.units.length < 2) return [];
+      return source.neighbors.filter((id) => (
+        state.map.regions[id].ownerId === source.ownerId
+        && state.map.regions[id].units.length < UNIT_CAP
+      ));
+    }
+    return owned.filter((source) => (
+      source.units.length >= 2
+      && source.neighbors.some((id) => (
+        state.map.regions[id].ownerId === source.ownerId
+        && state.map.regions[id].units.length < UNIT_CAP
+      ))
+    )).map((region) => region.id);
+  }
+  return [];
+}
+
+export function getPlayableCards(state) {
+  if (!state.config.cardsEnabled || state.phase !== "playing" || requiresCardDiscard(state)) return [];
+  return getActivePlayer(state).hand.filter((card) => getLegalCardTargets(state, card.id).length);
+}
+
+function addEffect(state, type, regionId, cardId) {
+  state.cards.effects.push({ type, playerId: getActivePlayer(state).id, regionId, cardId });
+}
+
+function removeCardFromHand(state, cardId) {
+  const player = getActivePlayer(state);
+  const index = player.hand.findIndex((card) => card.id === cardId);
+  if (index < 0) throw new Error("Card is not in the active player's hand");
+  const [card] = player.hand.splice(index, 1);
+  state.cards.discardPile.push(card);
+  return card;
+}
+
+export function discardCard(currentState, cardId) {
+  if (!requiresCardDiscard(currentState)) throw new Error("No card discard is required");
+  const state = clone(currentState);
+  const card = removeCardFromHand(state, cardId);
+  state.log.unshift({
+    type: "cardDiscarded",
+    playerId: getActivePlayer(state).id,
+    cardType: card.type,
+    round: state.turn.round,
+  });
+  state.log = state.log.slice(0, 200);
+  return state;
+}
+
+export function playCard(currentState, cardId, selection = {}) {
+  const card = findHandCard(currentState, cardId);
+  if (!card) throw new Error("Card is not in the active player's hand");
+  const sourceId = selection.sourceId;
+  const targetId = selection.targetId;
+  const firstTarget = card.type === "redeploy" ? sourceId : targetId;
+  if (!getLegalCardTargets(currentState, cardId).includes(firstTarget)) throw new Error("Illegal card target");
+  if (card.type === "redeploy" && !getLegalCardTargets(currentState, cardId, { sourceId }).includes(targetId)) {
+    throw new Error("Illegal redeployment target");
+  }
+
+  const state = clone(currentState);
+  const rng = new SeededRandom(state.rngState);
+  const result = { cardType: card.type, sourceId, targetId, affectedRegionIds: [] };
+  if (card.type === "supplyDrop") {
+    const target = state.map.regions[targetId];
+    while (target.units.length < UNIT_CAP && result.affectedRegionIds.length < 2) {
+      target.units.push(randomUnit(rng));
+      result.affectedRegionIds.push(targetId);
+    }
+  } else if (card.type === "redeploy") {
+    const source = state.map.regions[sourceId];
+    const target = state.map.regions[targetId];
+    const { garrison, remaining } = selectGarrison(source.units);
+    const priority = { armor: 0, artillery: 1, infantry: 2 };
+    const ordered = remaining.map((type, index) => ({ type, index }))
+      .sort((first, second) => priority[first.type] - priority[second.type] || first.index - second.index);
+    const moving = ordered.slice(0, Math.min(2, UNIT_CAP - target.units.length));
+    const movingIndexes = new Set(moving.map((unit) => unit.index));
+    source.units = [garrison, ...remaining.filter((_, index) => !movingIndexes.has(index))];
+    target.units.push(...moving.map((unit) => unit.type));
+    result.moved = moving.length;
+    result.affectedRegionIds.push(sourceId, targetId);
+  } else if (["fireSupport", "fortification", "luckyRoll"].includes(card.type)) {
+    addEffect(state, card.type, targetId, card.id);
+    result.affectedRegionIds.push(targetId);
+  } else if (card.type === "mobilization") {
+    const target = state.map.regions[targetId];
+    const neighbors = target.neighbors
+      .map((id) => state.map.regions[id])
+      .filter((region) => region.ownerId === target.ownerId && region.units.length < UNIT_CAP)
+      .sort((first, second) => first.units.length - second.units.length || first.id - second.id)
+      .slice(0, 3);
+    for (const region of [target, ...neighbors]) {
+      if (region.units.length >= UNIT_CAP) continue;
+      region.units.push(randomUnit(rng));
+      result.affectedRegionIds.push(region.id);
+    }
+  }
+  state.rngState = rng.state;
+  removeCardFromHand(state, cardId);
+  state.log.unshift({
+    type: "cardPlayed",
+    playerId: getActivePlayer(state).id,
+    cardType: card.type,
+    sourceId,
+    targetId,
+    affectedRegionIds: result.affectedRegionIds,
+    round: state.turn.round,
+  });
+  state.log = state.log.slice(0, 200);
+  return { state, result };
 }
 
 function dieModifiers(units, terrain, role) {
@@ -325,24 +533,47 @@ export function getBattleModifierSummary(state, sourceId, targetId) {
   const source = state.map.regions[sourceId];
   const target = state.map.regions[targetId];
   if (!source || !target) return null;
-  const attackerBonus = dieModifiers(source.units, target.terrain, "attacker")
+  const attackerTerrainBonus = dieModifiers(source.units, target.terrain, "attacker")
     .reduce((sum, modifier) => sum + modifier, 0);
-  const defenderBonus = dieModifiers(target.units, target.terrain, "defender")
+  const defenderTerrainBonus = dieModifiers(target.units, target.terrain, "defender")
     .reduce((sum, modifier) => sum + modifier, 0);
+  const attackerCardBonus = (state.cards?.effects ?? []).filter((effect) => (
+    effect.type === "fireSupport" && effect.playerId === source.ownerId && effect.regionId === sourceId
+  )).length * 3;
+  const defenderCardBonus = (state.cards?.effects ?? []).filter((effect) => (
+    effect.type === "fortification" && effect.playerId === target.ownerId && effect.regionId === targetId
+  )).length * 3;
+  const attackerBonus = attackerTerrainBonus + attackerCardBonus;
+  const defenderBonus = defenderTerrainBonus + defenderCardBonus;
   return {
     attackerBonus,
     defenderBonus,
     netBonus: attackerBonus - defenderBonus,
+    attackerTerrainBonus,
+    defenderTerrainBonus,
+    attackerCardBonus,
+    defenderCardBonus,
   };
 }
 
-function rollArmy(units, terrain, role, rng, forcedRolls) {
+function rollArmy(units, terrain, role, rng, forcedRolls, rerollPasses = 0, forcedRerolls = []) {
   const modifiers = dieModifiers(units, terrain, role);
-  return units.map((type, index) => {
+  const dice = units.map((type, index) => {
     const base = forcedRolls?.[index] ?? rng.int(1, 6);
     if (!Number.isInteger(base) || base < 1 || base > 6) throw new RangeError("Forced rolls must be W6 results");
-    return { type, base, modifier: modifiers[index], total: base + modifiers[index] };
+    return { type, base, modifier: modifiers[index], total: base + modifiers[index], rerolls: 0 };
   });
+  for (let pass = 0; pass < rerollPasses; pass += 1) {
+    dice.forEach((die, index) => {
+      if (die.base > 2) return;
+      const base = forcedRerolls?.[pass]?.[index] ?? rng.int(1, 6);
+      if (!Number.isInteger(base) || base < 1 || base > 6) throw new RangeError("Forced rerolls must be W6 results");
+      die.base = base;
+      die.total = base + die.modifier;
+      die.rerolls += 1;
+    });
+  }
+  return dice;
 }
 
 function selectGarrison(units) {
@@ -361,6 +592,11 @@ function eliminatePlayer(state, defeatedId, victorId) {
   const defeated = state.players.find((player) => player.id === defeatedId);
   if (!defeated?.active) return 0;
   defeated.active = false;
+  if (state.cards) {
+    state.cards.discardPile.push(...defeated.hand);
+    defeated.hand = [];
+    state.cards.effects = state.cards.effects.filter((effect) => effect.playerId !== defeatedId);
+  }
   let transferred = 0;
   for (const region of state.map.regions) {
     if (region.ownerId === defeatedId) {
@@ -372,10 +608,18 @@ function eliminatePlayer(state, defeatedId, victorId) {
   return transferred;
 }
 
+function retirePlayerCards(state, player) {
+  if (!state.cards || !player.hand?.length && !state.cards.effects.some((effect) => effect.playerId === player.id)) return;
+  state.cards.discardPile.push(...(player.hand ?? []));
+  player.hand = [];
+  state.cards.effects = state.cards.effects.filter((effect) => effect.playerId !== player.id);
+}
+
 function updateEliminationsAndVictory(state) {
   for (const player of state.players) {
     if (player.active && !state.map.regions.some((region) => region.ownerId === player.id)) {
       player.active = false;
+      retirePlayerCards(state, player);
       state.log.unshift({ type: "playerEliminated", playerId: player.id, victorId: null, transferred: 0 });
     }
   }
@@ -397,12 +641,36 @@ export function resolveAttack(currentState, sourceId, targetId, options = {}) {
   const attackerId = source.ownerId;
   const defenderId = target.ownerId;
   const rng = new SeededRandom(state.rngState);
-  const attackerDice = rollArmy(source.units, target.terrain, "attacker", rng, options.attackerRolls);
+  const attackerEffects = state.cards?.effects.filter((effect) => (
+    effect.playerId === attackerId && effect.regionId === sourceId
+    && ["fireSupport", "luckyRoll"].includes(effect.type)
+  )) ?? [];
+  const defenderEffects = state.cards?.effects.filter((effect) => (
+    effect.playerId === defenderId && effect.regionId === targetId && effect.type === "fortification"
+  )) ?? [];
+  const fireSupport = attackerEffects.filter((effect) => effect.type === "fireSupport").length;
+  const luckyRerolls = attackerEffects.filter((effect) => effect.type === "luckyRoll").length;
+  const attackerDice = rollArmy(
+    source.units,
+    target.terrain,
+    "attacker",
+    rng,
+    options.attackerRolls,
+    luckyRerolls,
+    options.attackerRerolls,
+  );
   const defenderDice = rollArmy(target.units, target.terrain, "defender", rng, options.defenderRolls);
-  const attackerTotal = attackerDice.reduce((sum, die) => sum + die.total, 0);
-  const defenderTotal = defenderDice.reduce((sum, die) => sum + die.total, 0);
+  const attackerCardBonus = fireSupport * 3;
+  const defenderCardBonus = defenderEffects.length * 3;
+  const attackerTotal = attackerDice.reduce((sum, die) => sum + die.total, 0) + attackerCardBonus;
+  const defenderTotal = defenderDice.reduce((sum, die) => sum + die.total, 0) + defenderCardBonus;
   const attackerWon = attackerTotal > defenderTotal;
   const { garrison, remaining } = selectGarrison(source.units);
+
+  if (state.cards) {
+    const consumed = new Set([...attackerEffects, ...defenderEffects].map((effect) => effect.cardId));
+    state.cards.effects = state.cards.effects.filter((effect) => !consumed.has(effect.cardId));
+  }
 
   source.units = [garrison];
   if (attackerWon) {
@@ -428,6 +696,10 @@ export function resolveAttack(currentState, sourceId, targetId, options = {}) {
     defenderDice,
     attackerTotal,
     defenderTotal,
+    attackerCardBonus,
+    defenderCardBonus,
+    luckyRerolls,
+    appliedCards: [...attackerEffects, ...defenderEffects].map((effect) => effect.type),
     attackerWon,
   };
   state.log.unshift({ type: "battle", round: state.turn.round, ...battle });
@@ -492,6 +764,7 @@ function distributeReinforcements(state, playerId, rng) {
 
 export function endTurn(currentState) {
   if (currentState.phase !== "playing") return currentState;
+  if (requiresCardDiscard(currentState)) throw new Error("Discard a card before ending the turn");
   const state = clone(currentState);
   const player = getActivePlayer(state);
   const rng = new SeededRandom(state.rngState);
@@ -505,6 +778,12 @@ export function endTurn(currentState) {
     round: state.turn.round,
   });
 
+  if (state.cards) {
+    state.cards.effects = state.cards.effects.filter((effect) => !(
+      effect.playerId === player.id && ["fireSupport", "luckyRoll"].includes(effect.type)
+    ));
+  }
+
   const previousIndex = state.turn.activePlayerIndex;
   let nextIndex = previousIndex;
   for (let offset = 1; offset <= state.players.length; offset += 1) {
@@ -516,6 +795,20 @@ export function endTurn(currentState) {
   }
   state.turn.activePlayerIndex = nextIndex;
   if (nextIndex <= previousIndex) state.turn.round += 1;
+  if (state.cards) {
+    const nextPlayerId = state.players[nextIndex].id;
+    state.cards.effects = state.cards.effects.filter((effect) => !(
+      effect.playerId === nextPlayerId && effect.type === "fortification"
+    ));
+    const drawn = drawCard(state, nextPlayerId, rng);
+    if (drawn) state.log.unshift({
+      type: "cardDrawn",
+      playerId: nextPlayerId,
+      cardType: drawn.type,
+      round: state.turn.round,
+    });
+  }
+  state.rngState = rng.state;
   state.log.unshift({ type: "turnStarted", playerId: state.players[nextIndex].id, round: state.turn.round });
   state.log = state.log.slice(0, 200);
   return state;
@@ -540,7 +833,33 @@ export function computeBattleOdds(state, sourceId, targetId) {
   const source = state.map.regions[sourceId];
   const target = state.map.regions[targetId];
   if (!source || !target) return 0;
-  const attacker = sumDistribution(dieModifiers(source.units, target.terrain, "attacker"));
+  const summary = getBattleModifierSummary(state, sourceId, targetId);
+  const luckyRerolls = (state.cards?.effects ?? []).filter((effect) => (
+    effect.type === "luckyRoll" && effect.playerId === source.ownerId && effect.regionId === sourceId
+  )).length;
+  const dieDistribution = (modifiers, passes) => {
+    if (!passes) return sumDistribution(modifiers);
+    let distribution = new Map([[0, 1]]);
+    for (const modifier of modifiers) {
+      const faces = new Map();
+      const expand = (face, pass) => {
+        if (face <= 2 && pass < passes) {
+          for (let next = 1; next <= 6; next += 1) expand(next, pass + 1);
+          return;
+        }
+        const weight = 6 ** (passes - pass);
+        faces.set(face + modifier, (faces.get(face + modifier) ?? 0) + weight);
+      };
+      for (let face = 1; face <= 6; face += 1) expand(face, 0);
+      const next = new Map();
+      for (const [sum, count] of distribution) {
+        for (const [value, faceCount] of faces) next.set(sum + value, (next.get(sum + value) ?? 0) + count * faceCount);
+      }
+      distribution = next;
+    }
+    return distribution;
+  };
+  const attacker = dieDistribution(dieModifiers(source.units, target.terrain, "attacker"), luckyRerolls);
   const defender = sumDistribution(dieModifiers(target.units, target.terrain, "defender"));
   let wins = 0;
   let outcomes = 0;
@@ -548,7 +867,7 @@ export function computeBattleOdds(state, sourceId, targetId) {
     for (const [defenderSum, defenderCount] of defender) {
       const combinations = attackerCount * defenderCount;
       outcomes += combinations;
-      if (attackerSum > defenderSum) wins += combinations;
+      if (attackerSum + summary.attackerCardBonus > defenderSum + summary.defenderCardBonus) wins += combinations;
     }
   }
   return outcomes ? wins / outcomes : 0;
@@ -565,6 +884,29 @@ export function validateGameState(state) {
   if (!Number.isInteger(state.turn?.activePlayerIndex)) return false;
   if (!state.players[state.turn.activePlayerIndex]) return false;
   if (state.config.supplyRate !== undefined && !Object.hasOwn(SUPPLY_RATES, state.config.supplyRate)) return false;
+  if (typeof state.config.cardsEnabled !== "boolean") return false;
+  if (!state.cards || !Array.isArray(state.cards.drawPile) || !Array.isArray(state.cards.discardPile) || !Array.isArray(state.cards.effects)) return false;
+  if (!state.players.every((player, index) => (
+    Array.isArray(player.hand)
+    && player.hand.length <= CARD_HAND_LIMIT + (index === state.turn.activePlayerIndex ? 1 : 0)
+  ))) return false;
+  const cardContainers = [
+    ...state.cards.drawPile,
+    ...state.cards.discardPile,
+    ...state.players.flatMap((player) => player.hand),
+  ];
+  if (!cardContainers.every((card) => (
+    card && typeof card.id === "string" && CARD_TYPES.includes(card.type)
+  ))) return false;
+  if (new Set(cardContainers.map((card) => card.id)).size !== cardContainers.length) return false;
+  if (state.config.cardsEnabled && cardContainers.length !== Object.values(CARD_DECK_COUNTS).reduce((sum, count) => sum + count, 0)) return false;
+  if (!state.config.cardsEnabled && cardContainers.length !== 0) return false;
+  if (!state.cards.effects.every((effect) => (
+    ["fireSupport", "fortification", "luckyRoll"].includes(effect.type)
+    && typeof effect.cardId === "string"
+    && state.players.some((player) => player.id === effect.playerId)
+    && state.map.regions.some((region) => region.id === effect.regionId)
+  ))) return false;
   return state.map.regions.every((region, index) => (
     region.id === index
     && Array.isArray(region.neighbors)
@@ -580,7 +922,14 @@ export function validateGameState(state) {
 
 export function deserializeGame(serialized) {
   try {
-    const state = JSON.parse(serialized);
+    let state = JSON.parse(serialized);
+    if (state?.schemaVersion === 1 && state.config && Array.isArray(state.players)) {
+      state = clone(state);
+      state.schemaVersion = SCHEMA_VERSION;
+      state.config.cardsEnabled = false;
+      state.players.forEach((player) => { player.hand = []; });
+      state.cards = { drawPile: [], discardPile: [], effects: [] };
+    }
     return validateGameState(state) ? state : null;
   } catch {
     return null;

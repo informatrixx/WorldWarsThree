@@ -145,13 +145,15 @@ test("audible effects prefer generated WAV media and clean up their URLs", async
   });
 
   assert.equal(await manager.playSelection(), true);
+  assert.equal(await manager.playCardDraw(), true);
+  assert.equal(await manager.playCard(), true);
   assert.equal(await manager.playTurnStart(true), true);
   assert.equal(await manager.playBattle(true), true);
   assert.equal(await manager.playBattle(false), true);
-  assert.equal(plays, 4);
+  assert.equal(plays, 6);
   assert.ok(pauses >= 1, "a new battle must stop the previous battle clip");
   assert.equal(manager.battleMedia.size, 1);
-  assert.equal(blobs.length, 4);
+  assert.equal(blobs.length, 6);
   assert.equal(blobs.every((blob) => blob.type === "audio/wav"), true);
   assert.equal(new TextDecoder().decode(blobs[0].parts[0].slice(0, 4)), "RIFF");
   const clip = new DataView(blobs[0].parts[0]);
@@ -160,5 +162,5 @@ test("audible effects prefer generated WAV media and clean up their URLs", async
   assert.ok(peak >= .87, "effect clips must be normalized to an audible level");
 
   manager.destroy();
-  assert.equal(revoked.length, 4);
+  assert.equal(revoked.length, 6);
 });

@@ -11,6 +11,8 @@ const CLIP_RECIPES = {
   "turn-human": { duration: .44, tones: [[0, .2, 330, 330, .48, "triangle"], [.16, .24, 494, 494, .44, "triangle"]] },
   "turn-ai": { duration: .42, tones: [[0, .18, 247, 220, .4, "triangle"], [.15, .22, 294, 277, .36, "triangle"]] },
   "end-turn": { duration: .4, tones: [[0, .24, 350, 230, .45, "triangle"], [.08, .25, 270, 180, .34, "triangle"]] },
+  "card-draw": { duration: .32, tones: [[0, .12, 420, 520, .42, "triangle"], [.1, .16, 560, 680, .38, "sine"]], noise: [[0, .05, .18]] },
+  card: { duration: .34, tones: [[0, .16, 310, 465, .48, "triangle"], [.13, .18, 465, 620, .4, "triangle"]], noise: [[0, .045, .2]] },
   "battle-win": {
     duration: 1.05,
     tones: [[.52, .3, 196, 294, .44, "triangle"], [.65, .32, 294, 440, .36, "triangle"]],
@@ -450,6 +452,20 @@ export class SoundManager {
     return this.playWithClip("end-turn", () => {
       this.tone({ frequency: 240, endFrequency: 165, duration: .22, gain: .055, type: "triangle" });
       this.tone({ frequency: 320, endFrequency: 220, duration: .18, gain: .035, delay: .06 });
+    });
+  }
+
+  playCardDraw() {
+    return this.playWithClip("card-draw", () => {
+      this.tone({ frequency: 360, endFrequency: 520, duration: .14, gain: .075, type: "triangle" });
+      this.tone({ frequency: 520, endFrequency: 680, duration: .16, gain: .06, type: "sine", delay: .09 });
+    });
+  }
+
+  playCard() {
+    return this.playWithClip("card", () => {
+      this.tone({ frequency: 300, endFrequency: 460, duration: .15, gain: .085, type: "triangle" });
+      this.tone({ frequency: 460, endFrequency: 620, duration: .18, gain: .065, type: "triangle", delay: .11 });
     });
   }
 

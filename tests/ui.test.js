@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { calculateReinforcements, createGame, getLegalTargets, TERRAIN_TYPES } from "../src/core/game.js";
 import { GameApp } from "../src/ui.js";
 
-test("the map renders terrain badges and one overlapping sprite per unit", (context) => {
+test("the map renders one compact strength marker with exact composition per territory", (context) => {
   globalThis.window = { addEventListener() {} };
   context.after(() => delete globalThis.window);
   const app = new GameApp({});
@@ -24,20 +24,23 @@ test("the map renders terrain badges and one overlapping sprite per unit", (cont
   for (const terrain of TERRAIN_TYPES) {
     assert.match(svg, new RegExp(`class="region terrain-${terrain}`));
   }
-  const badgeCount = [...svg.matchAll(/class="terrain-badge"/g)].length;
-  assert.equal(badgeCount, app.state.map.regions.length);
-  const allUnits = app.state.map.regions.flatMap((region) => region.units);
-  assert.equal([...svg.matchAll(/class="map-unit-sprite unit-/g)].length, allUnits.length);
-  for (const type of ["infantry", "armor", "artillery"]) {
-    assert.equal(
-      [...svg.matchAll(new RegExp(`href="assets/units/${type}\\.png"`, "g"))].length,
-      allUnits.filter((unit) => unit === type).length,
-    );
-  }
-  assert.match(svg, /data-stack-row="1"/);
-  assert.doesNotMatch(svg, /unit-mix/);
-  assert.doesNotMatch(svg, /class="terrain-detail"/);
-  assert.doesNotMatch(svg, /class="terrain-symbol"/);
+  assert.equal([...svg.matchAll(/class="territory-token"/g)].length, app.state.map.regions.length);
+  assert.equal([...svg.matchAll(/class="token-terrain"/g)].length, app.state.map.regions.length);
+  const expectedTypeMarkers = app.state.map.regions.reduce((sum, region) => (
+    sum + new Set(region.units).size
+  ), 0);
+  assert.equal([...svg.matchAll(/class="force-type force-/g)].length, expectedTypeMarkers);
+  assert.match(svg, /class="map-detail-overview"/);
+  assert.doesNotMatch(svg, /map-unit-sprite|assets\/units\//);
+
+  const firstRegion = svg.slice(svg.indexOf('data-region-id="0"'), svg.indexOf('data-region-id="1"'));
+  assert.match(firstRegion, /class="unit-total"[^>]*>8<\/text>/);
+  assert.match(firstRegion, /force-infantry[\s\S]*class="force-count"[^>]*>3<\/text>/);
+  assert.match(firstRegion, /force-armor[\s\S]*class="force-count"[^>]*>2<\/text>/);
+  assert.match(firstRegion, /force-artillery[\s\S]*class="force-count"[^>]*>3<\/text>/);
+
+  app.camera.width = app.state.map.bounds.width * 0.7;
+  assert.equal(app.mapDetailClass(), "map-detail-tactical");
 });
 
 test("player overview, turn notice, and combat territories expose tactical context", (context) => {
@@ -65,7 +68,7 @@ test("player overview, turn notice, and combat territories expose tactical conte
   app.combatAnimation = { battle: { sourceId: source.id, targetId } };
   const map = app.renderMap();
   assert.match(map, /class="region terrain-[^"]+ headquarters/);
-  assert.match(map, /class="hq-emblem"/);
+  assert.match(map, /class="hq-token"/);
   assert.match(map, /combat-source/);
   assert.match(map, /combat-target/);
 
@@ -105,4 +108,42 @@ test("legal neighboring targets show relative modifiers while a prior battle ani
   assert.match(map, /selected-source/);
   assert.match(map, /legal-target/);
   assert.doesNotMatch(map, /combat-source|combat-target/);
+});
+
+test("the tactical card panel keeps AI cards secret and highlights legal card targets", (context) => {
+  globalThis.window = { addEventListener() {} };
+  context.after(() => delete globalThis.window);
+  const app = new GameApp({});
+  app.state = createGame({
+    playerCount: 2,
+    mapSize: "small",
+    difficulty: "normal",
+    victoryMode: "headquarters",
+    cardsEnabled: true,
+    locale: "de",
+    seed: "card-ui-test",
+  });
+  const original = app.state.players[0].hand.pop();
+  app.state.cards.drawPile.push(original);
+  const fortificationIndex = app.state.cards.drawPile.findIndex((card) => card.type === "fortification");
+  const [fortification] = app.state.cards.drawPile.splice(fortificationIndex, 1);
+  app.state.players[0].hand.push(fortification);
+  const luckyIndex = app.state.cards.drawPile.findIndex((card) => card.type === "luckyRoll");
+  const [lucky] = app.state.cards.drawPile.splice(luckyIndex, 1);
+  app.state.players[1].hand.push(lucky);
+  app.resetCamera();
+
+  const panel = app.renderCardsPanel();
+  assert.match(panel, /Befestigung/);
+  assert.doesNotMatch(panel, /Würfelglück/);
+  assert.match(app.renderPlayers(), /Karten/);
+
+  app.selectedCardId = fortification.id;
+  const targetCount = app.state.map.regions.filter((region) => region.ownerId === 0).length;
+  const map = app.renderMap();
+  assert.equal([...map.matchAll(/card-target/g)].length, targetCount);
+
+  const regionId = app.state.map.regions.find((region) => region.ownerId === 0).id;
+  app.state.cards.effects.push({ type: "fortification", playerId: 0, regionId, cardId: fortification.id });
+  assert.match(app.renderMap(), /effect-fortification/);
 });
