@@ -46,6 +46,7 @@ Open `http://localhost:8080` afterwards. There is no build step and there are no
 - Eigene Region und danach ein angrenzendes gegnerisches Ziel wählen.
 - Der Angriff beginnt direkt nach der Zielauswahl; mit `Esc` lässt sich eine offene Auswahl löschen.
 - Legale Ziele zeigen den relativen Kampfbonus als `+N`, `−N` oder `±0` direkt auf der Karte.
+- Jede Einheit erscheint als eigenes, überlappend gestapeltes Symbol direkt im kontrollierten Gebiet.
 - Während die Würfel noch rollen, kann bereits der nächste Angriff gewählt werden; er ersetzt die laufende Kampfanimation.
 - Karte mit Maus/Finger verschieben, mit Mausrad oder den Schaltflächen zoomen.
 - `F` passt die gesamte Karte in die Ansicht ein.

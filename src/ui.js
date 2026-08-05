@@ -53,10 +53,19 @@ function unitAsset(type) {
   return `assets/units/${type}.png`;
 }
 
-function dominantUnit(units) {
-  const counts = unitCounts(units);
-  return ["armor", "artillery", "infantry"]
-    .sort((first, second) => counts[second] - counts[first])[0];
+function renderUnitStack(units) {
+  const order = { infantry: 0, armor: 1, artillery: 2 };
+  const sorted = [...units].sort((first, second) => order[first] - order[second]);
+  const rows = sorted.length > 4
+    ? [sorted.slice(0, Math.ceil(sorted.length / 2)), sorted.slice(Math.ceil(sorted.length / 2))]
+    : [sorted];
+  return rows.map((row, rowIndex) => {
+    const y = rows.length === 1 ? -34 : rowIndex === 0 ? -43 : -25;
+    return row.map((type, columnIndex) => {
+      const centerX = (columnIndex - (row.length - 1) / 2) * 12;
+      return `<image class="map-unit-sprite unit-${type}" data-stack-row="${rowIndex}" href="${unitAsset(type)}" x="${number(centerX - 17)}" y="${y}" width="34" height="34" preserveAspectRatio="xMidYMid meet"/>`;
+    }).join("");
+  }).join("");
 }
 
 function renderTerrainBadge(terrain, label) {
@@ -418,8 +427,6 @@ export class GameApp {
     const legalTargetSet = new Set(legalTargets);
     const regions = this.state.map.regions.map((region) => {
       const player = this.state.players[region.ownerId];
-      const counts = unitCounts(region.units);
-      const leadingUnit = dominantUnit(region.units);
       const points = region.cells.map((cell) => {
         const polygon = getHexPoints(cell.q, cell.r).map((point) => `${number(point.x)},${number(point.y)}`).join(" ");
         return `<polygon points="${polygon}" class="region-cell"/><polygon points="${polygon}" class="region-pattern"/>`;
@@ -447,12 +454,11 @@ export class GameApp {
           ${points}
           <path class="region-boundary" d="${regionBoundary(region, ownerByCell)}"/>
           <g class="region-marker" transform="translate(${number(region.center.x)} ${number(region.center.y)})">
-            <image class="map-unit-sprite" href="${unitAsset(leadingUnit)}" x="-26" y="-40" width="52" height="52" preserveAspectRatio="xMidYMid meet"/>
+            <g class="map-unit-stack">${renderUnitStack(region.units)}</g>
             ${renderTerrainBadge(region.terrain, this.t(region.terrain))}
-            <circle class="unit-count-badge" cx="14" cy="4" r="15"/>
-            <text class="unit-total" x="14" y="9">${region.units.length}</text>
+            <circle class="unit-count-badge" cx="22" cy="9" r="10"/>
+            <text class="unit-total" x="22" y="13">${region.units.length}</text>
             ${region.isHeadquarters ? '<g class="hq-emblem"><circle class="hq-halo" cx="0" cy="-46" r="16"/><path class="hq-marker" d="M-16-53 0-61 16-53 13-36 0-30-13-36Z"/><path class="hq-star" d="M0-56 3-50 10-49 5-44 6-37 0-40-6-37-5-44-10-49-3-50Z"/><text class="hq-label" x="0" y="-45">HQ</text></g>' : ""}
-            <text class="unit-mix" y="34">●${counts.infantry} ◆${counts.armor} ▲${counts.artillery}</text>
             ${modifier ? `<g class="combat-modifier modifier-${modifier.netBonus > 0 ? "positive" : modifier.netBonus < 0 ? "negative" : "neutral"}" transform="translate(0 49)"><rect x="-15" y="-7" width="30" height="14" rx="5"/><text y="3">${signedModifier(modifier.netBonus)}</text></g>` : ""}
           </g>
         </g>

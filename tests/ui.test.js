@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { calculateReinforcements, createGame, getLegalTargets, TERRAIN_TYPES } from "../src/core/game.js";
 import { GameApp } from "../src/ui.js";
 
-test("the map renders one compact vector badge per region", (context) => {
+test("the map renders terrain badges and one overlapping sprite per unit", (context) => {
   globalThis.window = { addEventListener() {} };
   context.after(() => delete globalThis.window);
   const app = new GameApp({});
@@ -15,6 +15,9 @@ test("the map renders one compact vector badge per region", (context) => {
     locale: "de",
     seed: "terrain-detail-test",
   });
+  app.state.map.regions[0].units = [
+    "infantry", "infantry", "infantry", "armor", "armor", "artillery", "artillery", "artillery",
+  ];
   app.resetCamera();
 
   const svg = app.renderMap();
@@ -23,6 +26,16 @@ test("the map renders one compact vector badge per region", (context) => {
   }
   const badgeCount = [...svg.matchAll(/class="terrain-badge"/g)].length;
   assert.equal(badgeCount, app.state.map.regions.length);
+  const allUnits = app.state.map.regions.flatMap((region) => region.units);
+  assert.equal([...svg.matchAll(/class="map-unit-sprite unit-/g)].length, allUnits.length);
+  for (const type of ["infantry", "armor", "artillery"]) {
+    assert.equal(
+      [...svg.matchAll(new RegExp(`href="assets/units/${type}\\.png"`, "g"))].length,
+      allUnits.filter((unit) => unit === type).length,
+    );
+  }
+  assert.match(svg, /data-stack-row="1"/);
+  assert.doesNotMatch(svg, /unit-mix/);
   assert.doesNotMatch(svg, /class="terrain-detail"/);
   assert.doesNotMatch(svg, /class="terrain-symbol"/);
 });
