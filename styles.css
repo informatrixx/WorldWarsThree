@@ -382,12 +382,6 @@ input:hover {
   color: var(--teal);
 }
 
-.button-danger {
-  width: 100%;
-  background: linear-gradient(110deg, #ae3f3a, var(--danger));
-  color: white;
-}
-
 .continue-button {
   margin: -4px 0 19px;
 }
@@ -667,12 +661,6 @@ input:hover {
   filter: drop-shadow(0 0 8px rgba(255, 240, 158, .9));
 }
 
-.region.selected-target .region-boundary {
-  stroke: #ff6c64;
-  stroke-width: 6px;
-  filter: drop-shadow(0 0 9px rgba(255, 85, 75, .9));
-}
-
 .region.legal-target .region-boundary {
   stroke: rgba(255, 189, 105, 0.9);
   stroke-width: 4.2px;
@@ -834,42 +822,6 @@ input:hover {
   color: #cfe0e4;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 9px;
-}
-
-.odds {
-  display: grid;
-  margin: 13px 0;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 7px;
-}
-
-.odds span {
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 750;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.odds strong {
-  color: var(--gold);
-  font-size: 15px;
-}
-
-.odds i {
-  display: block;
-  height: 4px;
-  grid-column: 1 / -1;
-  overflow: hidden;
-  border-radius: 4px;
-  background: rgba(255,255,255,.08);
-}
-
-.odds b {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--danger), var(--gold), var(--teal));
 }
 
 .text-button {

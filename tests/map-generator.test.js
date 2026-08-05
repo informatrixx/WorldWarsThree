@@ -39,4 +39,11 @@ test("seed profiles include both open maps and maps with strategic bottlenecks",
   assert.ok(samples.some((map) => map.profile === "mixed"));
   assert.ok(samples.some((map) => map.profile === "fractured"));
   assert.ok(samples.some((map) => articulationPoints(map.regions).length >= 3));
+  for (const map of samples) {
+    const aspectRatio = Math.max(
+      map.bounds.width / map.bounds.height,
+      map.bounds.height / map.bounds.width,
+    );
+    assert.ok(aspectRatio <= 2.25, `map ${map.seed} is too elongated (${aspectRatio})`);
+  }
 });

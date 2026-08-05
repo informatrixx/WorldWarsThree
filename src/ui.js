@@ -1,6 +1,5 @@
 import { chooseAiAttack } from "./core/ai.js";
 import {
-  computeBattleOdds,
   createGame,
   deserializeGame,
   endTurn,
@@ -326,11 +325,9 @@ export class GameApp {
       }).join("");
       const selectedClass = region.id === this.selectedSource
         ? "selected-source"
-        : region.id === this.selectedTarget
-          ? "selected-target"
-          : legalTargets.includes(region.id)
-            ? "legal-target"
-            : "";
+        : legalTargets.includes(region.id)
+          ? "legal-target"
+          : "";
       const label = this.t("ariaRegion", {
         region: this.t("region", { id: region.id + 1 }),
         owner: playerName(this.state, player.id, this.locale),
@@ -364,14 +361,11 @@ export class GameApp {
 
   selectedRegionPanel() {
     const source = this.selectedSource === null ? null : this.state.map.regions[this.selectedSource];
-    const target = this.selectedTarget === null ? null : this.state.map.regions[this.selectedTarget];
     const instruction = !source
       ? this.t("selectSource")
       : !getLegalTargets(this.state, source.id).length
         ? this.t("noTargets")
-        : !target
-          ? this.t("selectTarget")
-          : "";
+        : this.t("selectTarget");
     const card = (region, label) => {
       if (!region) return "";
       const counts = unitCounts(region.units);
@@ -389,16 +383,11 @@ export class GameApp {
         </div>
       `;
     };
-    const odds = source && target ? computeBattleOdds(this.state, source.id, target.id) : 0;
     return `
       <section class="side-panel selection-panel">
         <div class="panel-kicker">${escapeHtml(this.t("attack"))}</div>
         ${instruction ? `<p class="instruction">${escapeHtml(instruction)}</p>` : ""}
-        <div class="selection-cards">${card(source, this.t("source"))}${card(target, this.t("target"))}</div>
-        ${target ? `
-          <div class="odds"><span>${escapeHtml(this.t("chance"))}</span><strong>${Math.round(odds * 100)}%</strong><i><b style="width:${Math.round(odds * 100)}%"></b></i></div>
-          <button class="button button-danger" id="attack-button">${escapeHtml(this.t("attack"))}<span>⚄</span></button>
-        ` : ""}
+        <div class="selection-cards">${card(source, this.t("source"))}</div>
         ${source ? `<button class="text-button" id="cancel-selection">× ${escapeHtml(this.t("cancel"))}</button>` : ""}
       </section>
     `;
@@ -551,7 +540,6 @@ export class GameApp {
         }
       });
     });
-    this.root.querySelector("#attack-button")?.addEventListener("click", () => this.performAttack());
     this.root.querySelector("#cancel-selection")?.addEventListener("click", () => {
       this.selectedSource = null;
       this.selectedTarget = null;
@@ -641,7 +629,9 @@ export class GameApp {
       this.selectedSource = this.selectedSource === regionId ? null : regionId;
       this.selectedTarget = null;
     } else if (this.selectedSource !== null && getLegalTargets(this.state, this.selectedSource).includes(regionId)) {
-      this.selectedTarget = this.selectedTarget === regionId ? null : regionId;
+      this.selectedTarget = regionId;
+      this.performAttack();
+      return;
     }
     this.renderGame();
   }

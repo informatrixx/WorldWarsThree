@@ -109,8 +109,11 @@ function addCorridor(land, start, end, width, rng) {
   for (const cell of hexLine(start, end)) {
     land.add(cellKey(cell.q, cell.r));
     if (width > 1) {
-      const side = rng.pick(adjacentCells(cell));
-      land.add(cellKey(side.q, side.r));
+      const sideIndex = rng.int(0, 2);
+      const [firstQ, firstR] = DIRECTIONS[sideIndex];
+      const [secondQ, secondR] = DIRECTIONS[sideIndex + 3];
+      land.add(cellKey(cell.q + firstQ, cell.r + firstR));
+      land.add(cellKey(cell.q + secondQ, cell.r + secondR));
     }
   }
 }
@@ -137,12 +140,15 @@ function growConnectedLand(land, target, rng) {
 
 function createLand(targetRegions, profile, rng) {
   const targetCells = targetRegions * 5;
-  const lobeCount = profile === "open" ? 1 : profile === "mixed" ? 3 : 5;
+  const lobeCount = profile === "open" ? 1 : profile === "mixed" ? 2 : 3;
   const land = new Set();
   const centers = [];
-  const spread = profile === "open"
-    ? 0
-    : Math.ceil(Math.sqrt(targetCells / lobeCount) * 2.15);
+  const quotaRatio = profile === "open" ? 1 : profile === "mixed" ? 0.56 : 0.4;
+  const quota = Math.ceil(targetCells * quotaRatio);
+  const approximateRadius = Math.sqrt(quota / 3);
+  const spread = profile === "open" ? 0 : Math.ceil(
+    approximateRadius * (profile === "mixed" ? 0.65 : 0.95),
+  );
 
   for (let index = 0; index < lobeCount; index += 1) {
     if (lobeCount === 1) {
@@ -156,14 +162,11 @@ function createLand(targetRegions, profile, rng) {
     });
   }
 
-  const fillRatio = profile === "open" ? 1 : profile === "mixed" ? 0.86 : 0.78;
-  const quota = Math.ceil((targetCells * fillRatio) / lobeCount);
   centers.forEach((center) => growBlob(center, quota, rng, land));
 
   if (centers.length > 1) {
     for (let index = 1; index < centers.length; index += 1) {
-      const width = profile === "mixed" && rng.next() > 0.45 ? 2 : 1;
-      addCorridor(land, centers[index - 1], centers[index], width, rng);
+      addCorridor(land, centers[index - 1], centers[index], 2, rng);
     }
   }
   growConnectedLand(land, targetCells, rng);
@@ -267,7 +270,7 @@ export function generateMap({ size = "medium", seed = "dicefront" } = {}) {
   if (!regionCount) throw new RangeError(`Unknown map size: ${size}`);
   const rng = new SeededRandom(`${seed}:map`);
   const profileRoll = rng.next();
-  const profile = profileRoll < 0.25 ? "open" : profileRoll < 0.75 ? "mixed" : "fractured";
+  const profile = profileRoll < 0.4 ? "open" : profileRoll < 0.85 ? "mixed" : "fractured";
   const land = createLand(regionCount, profile, rng);
   const { cells, assignment } = partitionLand(land, regionCount, rng);
   const regions = buildRegions(cells, assignment, regionCount);
