@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createGame, TERRAIN_TYPES } from "../src/core/game.js";
 import { GameApp } from "../src/ui.js";
 
-test("the map renders a vector detail layer for every terrain type", (context) => {
+test("the map renders one compact vector badge per region", (context) => {
   globalThis.window = { addEventListener() {} };
   context.after(() => delete globalThis.window);
   const app = new GameApp({});
@@ -19,10 +19,10 @@ test("the map renders a vector detail layer for every terrain type", (context) =
 
   const svg = app.renderMap();
   for (const terrain of TERRAIN_TYPES) {
-    assert.match(svg, new RegExp(`id="terrain-${terrain}"`));
     assert.match(svg, new RegExp(`class="region terrain-${terrain}`));
-    assert.match(svg, new RegExp(`--terrain:url\\(#terrain-${terrain}\\)`));
   }
-  assert.match(svg, /class="terrain-detail"/);
+  const badgeCount = [...svg.matchAll(/class="terrain-badge"/g)].length;
+  assert.equal(badgeCount, app.state.map.regions.length);
+  assert.doesNotMatch(svg, /class="terrain-detail"/);
   assert.doesNotMatch(svg, /class="terrain-symbol"/);
 });

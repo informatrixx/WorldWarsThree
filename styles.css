@@ -643,26 +643,6 @@ input:hover {
 .terrain-hills .region-cell { filter: sepia(.24) brightness(.86); }
 .terrain-city .region-cell { filter: brightness(1.05) saturate(.72); }
 
-.terrain-detail {
-  fill: var(--terrain);
-  opacity: .58;
-  pointer-events: none;
-}
-
-.terrain-plains .terrain-detail { opacity: .38; }
-.terrain-city .terrain-detail { opacity: .5; }
-
-.terrain-stroke {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.35px;
-}
-
-.terrain-stroke-light { stroke: rgba(239, 247, 230, .48); }
-.terrain-stroke-dark { stroke: rgba(4, 15, 18, .58); }
-.terrain-fill-dark { fill: rgba(4, 15, 18, .5); }
-
 .region-pattern {
   fill: var(--pattern);
   opacity: 0.42;
@@ -706,6 +686,29 @@ input:hover {
 .map-unit-sprite {
   filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .75));
 }
+
+.terrain-badge circle {
+  fill: rgba(5, 13, 19, .9);
+  stroke: rgba(235, 245, 245, .42);
+  stroke-width: 1.4px;
+}
+
+.terrain-badge-shape {
+  fill: none;
+  stroke: #dce9e5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65px;
+}
+
+.terrain-forest .terrain-badge-shape {
+  fill: #b9dfc4;
+  stroke: #b9dfc4;
+}
+
+.terrain-plains .terrain-badge-shape { stroke: #d4dfad; }
+.terrain-hills .terrain-badge-shape { stroke: #e5c18b; }
+.terrain-city .terrain-badge-shape { stroke: #c9dbe3; }
 
 .unit-total {
   fill: white;

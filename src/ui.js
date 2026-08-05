@@ -49,6 +49,22 @@ function dominantUnit(units) {
     .sort((first, second) => counts[second] - counts[first])[0];
 }
 
+function renderTerrainBadge(terrain, label) {
+  const shapes = {
+    plains: '<path d="M-6 4H6M-5 0H4M-3-4H6"/>',
+    forest: '<path d="M0-7-5-1h3l-4 5h5v4h2V4h5L2-1h3z"/>',
+    hills: '<path d="M-7 5-2-3 1 1 4-5 8 5z"/>',
+    city: '<path d="M-6 5V-2h4V5M0 5V-6h5V5M-7 5H7M2-3h1M2 0h1"/>',
+  };
+  return `
+    <g class="terrain-badge" transform="translate(-25 6)" aria-hidden="true">
+      <title>${escapeHtml(label)}</title>
+      <circle r="11"/>
+      <g class="terrain-badge-shape">${shapes[terrain] ?? shapes.plains}</g>
+    </g>
+  `;
+}
+
 function regionBoundary(region, ownerByCell) {
   const segments = [];
   for (const cell of region.cells) {
@@ -319,39 +335,6 @@ export class GameApp {
     `).join("");
   }
 
-  renderTerrainDefinitions() {
-    return `
-      <pattern id="terrain-plains" width="43.3" height="37.5" patternUnits="userSpaceOnUse">
-        <g class="terrain-stroke terrain-stroke-light">
-          <path d="M7 29V19M7 23l-4-4M7 25l5-5M30 11V4M30 8l-3-3M30 8l4-4"/>
-          <path d="M-5 34Q7 27 19 33T48 31"/>
-        </g>
-      </pattern>
-      <pattern id="terrain-forest" width="43.3" height="37.5" patternUnits="userSpaceOnUse">
-        <g class="terrain-fill terrain-fill-dark">
-          <path d="M9 31h13l-4-7h3l-5.5-9-5.5 9h3zM28 20h11l-3.5-6h2.5l-4.5-8-4.5 8h2.5z"/>
-        </g>
-        <path class="terrain-stroke terrain-stroke-light" d="M15.5 15v17M33.5 7v14"/>
-      </pattern>
-      <pattern id="terrain-hills" width="43.3" height="37.5" patternUnits="userSpaceOnUse">
-        <g class="terrain-stroke terrain-stroke-dark">
-          <path d="M-5 28Q7 13 20 28Q31 17 48 29"/>
-          <path d="M1 32Q9 23 18 31M24 32Q32 25 43 33"/>
-        </g>
-        <path class="terrain-stroke terrain-stroke-light" d="M8 25Q14 18 20 28M29 27Q34 22 40 29"/>
-      </pattern>
-      <pattern id="terrain-city" width="43.3" height="37.5" patternUnits="userSpaceOnUse">
-        <g class="terrain-fill terrain-fill-dark">
-          <path d="M4 13h11v17H4zM18 7h10v23H18zM31 16h9v14H31z"/>
-        </g>
-        <g class="terrain-stroke terrain-stroke-light">
-          <path d="M7 17h5M7 21h5M21 12h4M21 16h4M21 20h4M34 20h3M34 24h3"/>
-          <path d="M-2 33H45"/>
-        </g>
-      </pattern>
-    `;
-  }
-
   renderMap() {
     const ownerByCell = new Map();
     this.state.map.regions.forEach((region) => region.cells.forEach((cell) => {
@@ -364,7 +347,7 @@ export class GameApp {
       const leadingUnit = dominantUnit(region.units);
       const points = region.cells.map((cell) => {
         const polygon = getHexPoints(cell.q, cell.r).map((point) => `${number(point.x)},${number(point.y)}`).join(" ");
-        return `<polygon points="${polygon}" class="region-cell"/><polygon points="${polygon}" class="terrain-detail"/><polygon points="${polygon}" class="region-pattern"/>`;
+        return `<polygon points="${polygon}" class="region-cell"/><polygon points="${polygon}" class="region-pattern"/>`;
       }).join("");
       const selectedClass = region.id === this.selectedSource
         ? "selected-source"
@@ -379,11 +362,12 @@ export class GameApp {
       });
       return `
         <g class="region terrain-${region.terrain} ${selectedClass}" data-region-id="${region.id}" tabindex="0" role="button"
-          aria-label="${escapeHtml(label)}" style="--region-color:${player.style.color};--region-accent:${player.style.accent};--pattern:url(#player-pattern-${player.id});--terrain:url(#terrain-${region.terrain})">
+          aria-label="${escapeHtml(label)}" style="--region-color:${player.style.color};--region-accent:${player.style.accent};--pattern:url(#player-pattern-${player.id})">
           ${points}
           <path class="region-boundary" d="${regionBoundary(region, ownerByCell)}"/>
           <g class="region-marker" transform="translate(${number(region.center.x)} ${number(region.center.y)})">
             <image class="map-unit-sprite" href="${unitAsset(leadingUnit)}" x="-26" y="-40" width="52" height="52" preserveAspectRatio="xMidYMid meet"/>
+            ${renderTerrainBadge(region.terrain, this.t(region.terrain))}
             <circle class="unit-count-badge" cx="14" cy="4" r="15"/>
             <text class="unit-total" x="14" y="9">${region.units.length}</text>
             ${region.isHeadquarters ? '<path class="hq-marker" d="M23-41 31-33 23-25 15-33Z"/><text class="hq-label" x="23" y="-30">HQ</text>' : ""}
@@ -395,7 +379,7 @@ export class GameApp {
     const viewBox = `${number(this.camera.x)} ${number(this.camera.y)} ${number(this.camera.width)} ${number(this.camera.height)}`;
     return `
       <svg id="battle-map" viewBox="${viewBox}" aria-label="${escapeHtml(this.t("ariaMap"))}" role="application">
-        <defs>${this.renderPatternDefinitions()}${this.renderTerrainDefinitions()}</defs>
+        <defs>${this.renderPatternDefinitions()}</defs>
         <rect class="map-background" x="${this.state.map.bounds.x - 1000}" y="${this.state.map.bounds.y - 1000}" width="${this.state.map.bounds.width + 2000}" height="${this.state.map.bounds.height + 2000}"/>
         <g class="map-regions">${regions}</g>
       </svg>
