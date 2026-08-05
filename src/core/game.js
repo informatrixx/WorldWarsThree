@@ -45,12 +45,151 @@ function normalizeConfig(config = {}) {
   };
 }
 
-function assignOwners(regions, players, rng) {
-  const shuffled = rng.shuffle(regions.map((region) => region.id));
-  const offset = rng.int(0, players.length - 1);
-  shuffled.forEach((regionId, index) => {
-    regions[regionId].ownerId = players[(index + offset) % players.length].id;
+function regionDistanceMatrix(regions) {
+  return regions.map((origin) => {
+    const distances = Array(regions.length).fill(Infinity);
+    distances[origin.id] = 0;
+    const queue = [origin.id];
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const regionId = queue[cursor];
+      for (const neighborId of regions[regionId].neighbors) {
+        if (distances[neighborId] !== Infinity) continue;
+        distances[neighborId] = distances[regionId] + 1;
+        queue.push(neighborId);
+      }
+    }
+    return distances;
   });
+}
+
+function balancedRegionQuotas(regionCount, players, rng) {
+  const base = Math.floor(regionCount / players.length);
+  const quotas = Array(players.length).fill(base);
+  rng.shuffle(players.map((player) => player.id))
+    .slice(0, regionCount % players.length)
+    .forEach((playerId) => { quotas[playerId] += 1; });
+  return quotas;
+}
+
+function chooseHeadquarters(regions, players, distances, rng) {
+  const headquarters = [rng.pick(regions).id];
+  while (headquarters.length < players.length) {
+    const candidates = regions
+      .filter((region) => !headquarters.includes(region.id))
+      .map((region) => ({
+        id: region.id,
+        distance: Math.min(...headquarters.map((hqId) => distances[hqId][region.id])),
+      }));
+    const greatestDistance = Math.max(...candidates.map((candidate) => candidate.distance));
+    headquarters.push(rng.pick(candidates.filter((candidate) => candidate.distance === greatestDistance)).id);
+  }
+  return headquarters;
+}
+
+function safeUnitCap(regionId, ownerId, headquarters, distances) {
+  return Math.min(
+    UNIT_CAP,
+    ...headquarters
+      .filter((_, playerId) => playerId !== ownerId)
+      .map((hqId) => distances[hqId][regionId]),
+  );
+}
+
+function buildOwnershipCandidate(regions, players, distances, rng) {
+  const quotas = balancedRegionQuotas(regions.length, players, rng);
+  const headquarters = chooseHeadquarters(regions, players, distances, rng);
+  const ownerIds = Array(regions.length).fill(null);
+  const ownedCounts = Array(players.length).fill(0);
+  headquarters.forEach((regionId, playerId) => {
+    ownerIds[regionId] = playerId;
+    ownedCounts[playerId] = 1;
+  });
+
+  const coreTargets = quotas.map((quota) => Math.min(4, Math.max(2, Math.floor(quota / 3))));
+  let growing = true;
+  while (growing && coreTargets.some((target, playerId) => ownedCounts[playerId] < target)) {
+    growing = false;
+    for (const player of rng.shuffle(players)) {
+      const playerId = player.id;
+      if (ownedCounts[playerId] >= coreTargets[playerId]) continue;
+      const frontier = regions
+        .filter((region) => ownerIds[region.id] === null && region.neighbors.some((id) => ownerIds[id] === playerId))
+        .map((region) => ({
+          region,
+          friendlyNeighbors: region.neighbors.filter((id) => ownerIds[id] === playerId).length,
+          distance: distances[headquarters[playerId]][region.id],
+        }));
+      if (!frontier.length) continue;
+      const bestScore = Math.max(...frontier.map((entry) => entry.friendlyNeighbors * 20 - entry.distance));
+      const selected = rng.pick(frontier.filter(
+        (entry) => entry.friendlyNeighbors * 20 - entry.distance === bestScore,
+      )).region;
+      ownerIds[selected.id] = playerId;
+      ownedCounts[playerId] += 1;
+      growing = true;
+    }
+  }
+  if (coreTargets.some((target, playerId) => ownedCounts[playerId] < target)) return null;
+
+  for (const region of rng.shuffle(regions.filter((entry) => ownerIds[entry.id] === null))) {
+    const eligible = players.filter((player) => ownedCounts[player.id] < quotas[player.id]);
+    if (!eligible.length) return null;
+    const selected = rng.weighted(eligible, (player) => quotas[player.id] - ownedCounts[player.id]);
+    ownerIds[region.id] = selected.id;
+    ownedCounts[selected.id] += 1;
+  }
+  if (ownedCounts.some((count, playerId) => count !== quotas[playerId])) return null;
+
+  const capacities = players.map((player) => regions.reduce((sum, region) => (
+    sum + (ownerIds[region.id] === player.id
+      ? safeUnitCap(region.id, player.id, headquarters, distances)
+      : 0)
+  ), 0));
+  const commonCapacity = Math.min(...capacities);
+  const maximumOwned = Math.max(...ownedCounts);
+  if (commonCapacity < maximumOwned) return null;
+  const pairDistances = headquarters.flatMap((hqId, first) => (
+    headquarters.slice(first + 1).map((otherId) => distances[hqId][otherId])
+  ));
+  return {
+    ownerIds,
+    headquarters,
+    commonCapacity,
+    minimumHeadquartersDistance: Math.min(...pairDistances),
+    totalHeadquartersDistance: pairDistances.reduce((sum, distance) => sum + distance, 0),
+  };
+}
+
+function assignOwnersAndHeadquarters(regions, players, rng) {
+  const distances = regionDistanceMatrix(regions);
+  let best = null;
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const candidate = buildOwnershipCandidate(regions, players, distances, rng);
+    if (!candidate) continue;
+    const isBetter = !best
+      || candidate.commonCapacity > best.commonCapacity
+      || (
+        candidate.commonCapacity === best.commonCapacity
+        && candidate.minimumHeadquartersDistance > best.minimumHeadquartersDistance
+      )
+      || (
+        candidate.commonCapacity === best.commonCapacity
+        && candidate.minimumHeadquartersDistance === best.minimumHeadquartersDistance
+        && candidate.totalHeadquartersDistance > best.totalHeadquartersDistance
+      );
+    if (isBetter) best = candidate;
+  }
+  if (!best) throw new Error("Unable to create a safe headquarters layout");
+
+  regions.forEach((region) => {
+    region.ownerId = best.ownerIds[region.id];
+    region.isHeadquarters = false;
+  });
+  players.forEach((player) => {
+    player.headquartersRegionId = best.headquarters[player.id];
+    regions[player.headquartersRegionId].isHeadquarters = true;
+  });
+  return distances;
 }
 
 function assignBalancedTerrain(regions, players, rng) {
@@ -82,8 +221,18 @@ function classPool(total, rng) {
   ]);
 }
 
-function assignBalancedUnits(regions, players, rng) {
-  const budget = Math.max(12, 3 * Math.ceil(regions.length / players.length));
+function assignBalancedUnits(regions, players, distances, rng) {
+  const desiredBudget = Math.max(12, 3 * Math.ceil(regions.length / players.length));
+  const headquarters = players.map((player) => player.headquartersRegionId);
+  const caps = regions.map((region) => safeUnitCap(region.id, region.ownerId, headquarters, distances));
+  const safeCapacities = players.map((player) => regions.reduce((sum, region) => (
+    sum + (region.ownerId === player.id ? caps[region.id] : 0)
+  ), 0));
+  const budget = Math.min(desiredBudget, ...safeCapacities);
+  const maximumOwned = Math.max(...players.map(
+    (player) => regions.filter((region) => region.ownerId === player.id).length,
+  ));
+  if (budget < maximumOwned) throw new Error("Safe unit budget cannot cover every region");
   for (const player of players) {
     const owned = rng.shuffle(regions.filter((region) => region.ownerId === player.id));
     const pool = classPool(budget, rng);
@@ -91,37 +240,13 @@ function assignBalancedUnits(regions, players, rng) {
       region.units.push(pool.pop());
     });
     while (pool.length) {
-      const eligible = owned.filter((region) => region.units.length < UNIT_CAP);
+      const eligible = owned.filter((region) => region.units.length < caps[region.id]);
       if (!eligible.length) break;
-      rng.pick(eligible).units.push(pool.pop());
+      rng.weighted(eligible, (region) => (caps[region.id] - region.units.length) ** 2).units.push(pool.pop());
     }
+    if (pool.length) throw new Error("Unable to distribute the safe unit budget");
   }
   return budget;
-}
-
-function squaredDistance(first, second) {
-  return (first.x - second.x) ** 2 + (first.y - second.y) ** 2;
-}
-
-function placeHeadquarters(regions, players, rng) {
-  const selected = [];
-  for (const player of players) {
-    const candidates = regions.filter((region) => region.ownerId === player.id);
-    let headquarters;
-    if (!selected.length) {
-      headquarters = rng.pick(candidates);
-    } else {
-      headquarters = candidates
-        .map((region) => ({
-          region,
-          distance: Math.min(...selected.map((other) => squaredDistance(region.center, other.center))),
-        }))
-        .sort((a, b) => b.distance - a.distance)[0].region;
-    }
-    headquarters.isHeadquarters = true;
-    player.headquartersRegionId = headquarters.id;
-    selected.push(headquarters);
-  }
 }
 
 export function createGame(inputConfig = {}) {
@@ -135,10 +260,9 @@ export function createGame(inputConfig = {}) {
     active: true,
     headquartersRegionId: null,
   }));
-  assignOwners(map.regions, players, rng);
+  const regionDistances = assignOwnersAndHeadquarters(map.regions, players, rng);
   assignBalancedTerrain(map.regions, players, rng);
-  const startingUnitBudget = assignBalancedUnits(map.regions, players, rng);
-  placeHeadquarters(map.regions, players, rng);
+  const startingUnitBudget = assignBalancedUnits(map.regions, players, regionDistances, rng);
 
   return {
     schemaVersion: SCHEMA_VERSION,

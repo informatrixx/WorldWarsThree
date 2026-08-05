@@ -27,6 +27,7 @@ Open `http://localhost:8080` afterwards. There is no build step and there are no
 - Infanterie verteidigt Wald und Städte, Panzer greifen im Flachland stärker an, Artillerie unterstützt Angriffe.
 - Nach dem Zug werden Verstärkungen anhand der größten verbundenen Gebietsgruppe und kontrollierter Städte verteilt.
 - Wähle zwischen totaler Eroberung und dem Ausschalten gegnerischer Hauptquartiere.
+- Jeder Spieler beginnt mit einem kompakten Heimatkern; die Starttruppen können in Runde 1 kein gegnerisches Hauptquartier erreichen.
 - Partien werden automatisch im Browser gespeichert. Derselbe Seed erzeugt dieselbe Karte.
 
 ---
@@ -36,6 +37,7 @@ Open `http://localhost:8080` afterwards. There is no build step and there are no
 - Infantry defends forests and cities, armor attacks plains more effectively, and artillery supports attacks.
 - Reinforcements depend on the largest connected territory group and controlled cities.
 - Choose total conquest or headquarters elimination.
+- Every faction starts with a compact home cluster; starting armies cannot reach an enemy headquarters during round one.
 - Matches are autosaved in the browser. The same seed creates the same map.
 
 ## Steuerung / Controls
