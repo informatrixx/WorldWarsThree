@@ -14,8 +14,10 @@ import { playerName, translate } from "./i18n.js";
 
 const SAVE_KEY = "dicefront-dominion:save:v1";
 const LOCALE_KEY = "dicefront-dominion:locale";
+const COMBAT_ANIMATION_MS = 760;
 const HEX_DIRECTIONS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 const EDGE_CORNERS = [[0, 1], [5, 0], [4, 5], [3, 4], [2, 3], [1, 2]];
+const DIE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 
 function escapeHtml(value) {
   return String(value)
@@ -66,6 +68,14 @@ function regionBoundary(region, ownerByCell) {
   return segments.join("");
 }
 
+function renderCombatDice(dice) {
+  return dice.map((die, index) => `
+    <span class="combat-die" style="--die-index:${index}" title="${escapeHtml(die.type)}">
+      <b>${DIE_FACES[die.base - 1]}</b>${die.modifier ? `<sup>+${die.modifier}</sup>` : ""}
+    </span>
+  `).join("");
+}
+
 export class GameApp {
   constructor(root) {
     this.root = root;
@@ -78,6 +88,8 @@ export class GameApp {
     this.cameraSeed = null;
     this.aiRunning = false;
     this.aiTimer = null;
+    this.combatAnimation = null;
+    this.combatAnimationTimer = null;
     this.toast = null;
     this.toastTimer = null;
     this.onKeyDown = this.onKeyDown.bind(this);
@@ -432,8 +444,35 @@ export class GameApp {
     `;
   }
 
+  renderCombatAnimation() {
+    if (!this.combatAnimation) return "";
+    const battle = this.combatAnimation.battle;
+    const attacker = this.state.players[battle.attackerId];
+    const defender = this.state.players[battle.defenderId];
+    return `
+      <div class="combat-overlay" aria-hidden="true">
+        <div class="combat-roll">
+          <div class="combat-side combat-attacker" style="--combat-color:${attacker.style.color}">
+            <span>${escapeHtml(this.t("attacker"))}</span>
+            <div class="combat-dice">${renderCombatDice(battle.attackerDice)}</div>
+            <strong class="combat-total">${battle.attackerTotal}</strong>
+          </div>
+          <div class="combat-outcome ${battle.attackerWon ? "won" : "lost"}">
+            <i>VS</i>
+            <b>${escapeHtml(this.t(battle.attackerWon ? "attackWon" : "attackLost"))}</b>
+          </div>
+          <div class="combat-side combat-defender" style="--combat-color:${defender.style.color}">
+            <span>${escapeHtml(this.t("defender"))}</span>
+            <div class="combat-dice">${renderCombatDice(battle.defenderDice)}</div>
+            <strong class="combat-total">${battle.defenderTotal}</strong>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   renderVictoryModal() {
-    if (this.state.phase !== "finished") return "";
+    if (this.state.phase !== "finished" || this.combatAnimation) return "";
     const humanWon = this.state.winnerId === 0;
     return `
       <div class="modal-layer" role="dialog" aria-modal="true">
@@ -477,6 +516,7 @@ export class GameApp {
               <button id="copy-seed" title="${escapeHtml(this.t("copySeed"))}"># ${escapeHtml(this.state.config.seed)}</button>
             </div>
             ${this.renderMap()}
+            ${this.renderCombatAnimation()}
             <div class="map-controls">
               <button data-zoom="1.22" aria-label="${escapeHtml(this.t("zoomIn"))}" title="${escapeHtml(this.t("zoomIn"))}">＋</button>
               <button data-zoom="0.82" aria-label="${escapeHtml(this.t("zoomOut"))}" title="${escapeHtml(this.t("zoomOut"))}">−</button>
@@ -493,7 +533,7 @@ export class GameApp {
               </div>
             </section>
             ${this.renderLog()}
-            <button class="button button-primary end-turn" id="end-turn" ${humanTurn ? "" : "disabled"}>${escapeHtml(this.t("endTurn"))}<span>→</span></button>
+            <button class="button button-primary end-turn" id="end-turn" ${humanTurn && !this.combatAnimation ? "" : "disabled"}>${escapeHtml(this.t("endTurn"))}<span>→</span></button>
           </aside>
         </div>
         ${this.toast ? `<div class="toast">${escapeHtml(this.toast)}</div>` : ""}
@@ -597,7 +637,7 @@ export class GameApp {
   }
 
   selectRegion(regionId) {
-    if (this.state.phase !== "playing") return;
+    if (this.state.phase !== "playing" || this.combatAnimation) return;
     const active = getActivePlayer(this.state);
     if (!active.isHuman) return;
     const region = this.state.map.regions[regionId];
@@ -615,15 +655,16 @@ export class GameApp {
 
   performAttack() {
     if (this.selectedSource === null || this.selectedTarget === null) return;
-    this.state = resolveAttack(this.state, this.selectedSource, this.selectedTarget).state;
+    const result = resolveAttack(this.state, this.selectedSource, this.selectedTarget);
+    this.state = result.state;
     this.selectedSource = null;
     this.selectedTarget = null;
     this.save();
-    this.renderGame();
+    this.showCombatAnimation(result.battle);
   }
 
   finishHumanTurn() {
-    if (!getActivePlayer(this.state).isHuman || this.state.phase !== "playing") return;
+    if (!getActivePlayer(this.state).isHuman || this.state.phase !== "playing" || this.combatAnimation) return;
     this.selectedSource = null;
     this.selectedTarget = null;
     this.state = endTurn(this.state);
@@ -649,18 +690,32 @@ export class GameApp {
       this.renderGame();
       return;
     }
-    this.state = resolveAttack(this.state, choice.sourceId, choice.targetId).state;
+    const result = resolveAttack(this.state, choice.sourceId, choice.targetId);
+    this.state = result.state;
     this.save();
-    this.renderGame();
-    this.aiTimer = window.setTimeout(() => {
+    this.showCombatAnimation(result.battle, () => {
       this.runAiStep(attackCount + 1);
-    }, 200);
+    });
+  }
+
+  showCombatAnimation(battle, onComplete) {
+    if (this.combatAnimationTimer) window.clearTimeout(this.combatAnimationTimer);
+    this.combatAnimation = { battle };
+    this.renderGame();
+    this.combatAnimationTimer = window.setTimeout(() => {
+      this.combatAnimation = null;
+      this.combatAnimationTimer = null;
+      this.renderGame();
+      onComplete?.();
+    }, COMBAT_ANIMATION_MS);
   }
 
   requestNewGame() {
     if (this.state?.phase === "playing" && !window.confirm(this.t("confirmNew"))) return;
     if (this.aiTimer) window.clearTimeout(this.aiTimer);
+    if (this.combatAnimationTimer) window.clearTimeout(this.combatAnimationTimer);
     this.aiRunning = false;
+    this.combatAnimation = null;
     this.clearSave();
     this.renderSetup();
   }
@@ -686,7 +741,7 @@ export class GameApp {
 
   onKeyDown(event) {
     if (!this.state) return;
-    if (event.key === "Escape") {
+    if (event.key === "Escape" && !this.combatAnimation) {
       this.selectedSource = null;
       this.selectedTarget = null;
       this.renderGame();
