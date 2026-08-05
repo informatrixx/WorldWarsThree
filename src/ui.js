@@ -1,6 +1,7 @@
 import { chooseAiAttack } from "./core/ai.js";
 import { SoundManager } from "./audio.js";
 import {
+  calculateReinforcements,
   createGame,
   deserializeGame,
   endTurn,
@@ -16,6 +17,7 @@ import { playerName, translate } from "./i18n.js";
 const SAVE_KEY = "dicefront-dominion:save:v1";
 const LOCALE_KEY = "dicefront-dominion:locale";
 const COMBAT_ANIMATION_MS = 1100;
+const TURN_NOTIFICATION_MS = 900;
 const HEX_DIRECTIONS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 const EDGE_CORNERS = [[0, 1], [5, 0], [4, 5], [3, 4], [2, 3], [1, 2]];
 const DIE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
@@ -107,6 +109,8 @@ export class GameApp {
     this.toastTimer = null;
     this.audio = new SoundManager();
     this.announcedWinnerId = null;
+    this.turnNotification = null;
+    this.turnNotificationTimer = null;
     this.onKeyDown = this.onKeyDown.bind(this);
     window.addEventListener("keydown", this.onKeyDown);
   }
@@ -295,7 +299,7 @@ export class GameApp {
       this.camera = null;
       this.announcedWinnerId = null;
       this.audio.setMatchActive(true);
-      this.renderGame();
+      this.announceCurrentTurn();
     });
     this.root.querySelector("#setup-form").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -312,7 +316,7 @@ export class GameApp {
       this.announcedWinnerId = null;
       this.audio.setMatchActive(true);
       this.save();
-      this.renderGame();
+      this.announceCurrentTurn();
     });
   }
 
@@ -334,6 +338,7 @@ export class GameApp {
     return {
       regions: regions.length,
       units: regions.reduce((sum, region) => sum + region.units.length, 0),
+      reinforcements: player.active ? calculateReinforcements(this.state, player.id) : 0,
     };
   }
 
@@ -346,7 +351,12 @@ export class GameApp {
           <span class="player-swatch"></span>
           <span class="player-data">
             <strong>${escapeHtml(playerName(this.state, player.id, this.locale))}</strong>
-            <small>${player.active ? `${this.t("territories", { count: stats.regions })} · ${this.t("armyCount", { count: stats.units })}` : this.t("eliminated")}</small>
+            ${player.active ? `
+              <span class="player-metrics">
+                <span title="${escapeHtml(this.t("territories", { count: stats.regions }))}"><b>${stats.regions}</b><small>${escapeHtml(this.t("territoryMetric"))}</small></span>
+                <span class="supply" title="${escapeHtml(this.t("reinforcementPreview", { count: stats.reinforcements }))}"><b>+${stats.reinforcements}</b><small>${escapeHtml(this.t("supplyMetric"))}</small></span>
+              </span>
+            ` : `<small class="eliminated-label">${escapeHtml(this.t("eliminated"))}</small>`}
           </span>
         </div>
       `;
@@ -383,11 +393,12 @@ export class GameApp {
         const polygon = getHexPoints(cell.q, cell.r).map((point) => `${number(point.x)},${number(point.y)}`).join(" ");
         return `<polygon points="${polygon}" class="region-cell"/><polygon points="${polygon}" class="region-pattern"/>`;
       }).join("");
-      const selectedClass = region.id === this.selectedSource
-        ? "selected-source"
-        : legalTargets.includes(region.id)
-          ? "legal-target"
-          : "";
+      const classes = [];
+      if (region.id === this.selectedSource) classes.push("selected-source");
+      else if (legalTargets.includes(region.id)) classes.push("legal-target");
+      if (region.id === this.combatAnimation?.battle.sourceId) classes.push("combat-source");
+      if (region.id === this.combatAnimation?.battle.targetId) classes.push("combat-target");
+      const selectedClass = classes.join(" ");
       const label = this.t("ariaRegion", {
         region: this.t("region", { id: region.id + 1 }),
         owner: playerName(this.state, player.id, this.locale),
@@ -517,6 +528,23 @@ export class GameApp {
     `;
   }
 
+  renderTurnNotification() {
+    if (!this.turnNotification) return "";
+    const player = this.state.players[this.turnNotification.playerId];
+    const message = player.isHuman
+      ? this.t("yourTurnNotice")
+      : this.t("playerTurnNotice", { player: playerName(this.state, player.id, this.locale) });
+    return `
+      <div class="turn-notification" role="status" aria-live="polite" style="--turn-color:${player.style.color}">
+        <i aria-hidden="true"></i>
+        <span>
+          <small>${escapeHtml(this.t("round", { round: this.turnNotification.round }))}</small>
+          <strong>${escapeHtml(message)}</strong>
+        </span>
+      </div>
+    `;
+  }
+
   renderVictoryModal() {
     if (this.state.phase !== "finished" || this.combatAnimation) return "";
     const humanWon = this.state.winnerId === 0;
@@ -563,6 +591,7 @@ export class GameApp {
               <button id="copy-seed" title="${escapeHtml(this.t("copySeed"))}"># ${escapeHtml(this.state.config.seed)}</button>
             </div>
             ${this.renderMap()}
+            ${this.renderTurnNotification()}
             ${this.renderCombatAnimation()}
             <div class="map-controls">
               <button data-zoom="1.22" aria-label="${escapeHtml(this.t("zoomIn"))}" title="${escapeHtml(this.t("zoomIn"))}">＋</button>
@@ -588,7 +617,7 @@ export class GameApp {
       </main>
     `;
     this.bindGameEvents();
-    if (!active.isHuman && this.state.phase === "playing" && !this.aiRunning) this.beginAiTurn();
+    if (!active.isHuman && this.state.phase === "playing" && !this.aiRunning && !this.turnNotification) this.beginAiTurn();
   }
 
   bindGameEvents() {
@@ -721,7 +750,7 @@ export class GameApp {
     void this.audio.playEndTurn();
     this.state = endTurn(this.state);
     this.save();
-    this.renderGame();
+    this.announceCurrentTurn();
   }
 
   beginAiTurn() {
@@ -739,7 +768,7 @@ export class GameApp {
       this.state = endTurn(this.state);
       this.aiRunning = false;
       this.save();
-      this.renderGame();
+      this.announceCurrentTurn();
       return;
     }
     const result = resolveAttack(this.state, choice.sourceId, choice.targetId);
@@ -767,12 +796,32 @@ export class GameApp {
     }, COMBAT_ANIMATION_MS);
   }
 
+  announceCurrentTurn() {
+    if (!this.state || this.state.phase !== "playing") {
+      this.turnNotification = null;
+      this.renderGame();
+      return;
+    }
+    if (this.turnNotificationTimer) window.clearTimeout(this.turnNotificationTimer);
+    const active = getActivePlayer(this.state);
+    this.turnNotification = { playerId: active.id, round: this.state.turn.round };
+    this.renderGame();
+    this.turnNotificationTimer = window.setTimeout(() => {
+      this.turnNotification = null;
+      this.turnNotificationTimer = null;
+      this.renderGame();
+    }, TURN_NOTIFICATION_MS);
+  }
+
   requestNewGame() {
     if (this.state?.phase === "playing" && !window.confirm(this.t("confirmNew"))) return;
     if (this.aiTimer) window.clearTimeout(this.aiTimer);
     if (this.combatAnimationTimer) window.clearTimeout(this.combatAnimationTimer);
+    if (this.turnNotificationTimer) window.clearTimeout(this.turnNotificationTimer);
     this.aiRunning = false;
     this.combatAnimation = null;
+    this.turnNotification = null;
+    this.turnNotificationTimer = null;
     this.announcedWinnerId = null;
     this.audio.setMatchActive(false);
     this.clearSave();

@@ -527,7 +527,7 @@ input:hover {
 .player-chip {
   position: relative;
   display: flex;
-  min-height: 54px;
+  min-height: 60px;
   align-items: center;
   gap: 9px;
   padding: 8px 13px;
@@ -560,21 +560,61 @@ input:hover {
   gap: 3px;
 }
 
-.player-data strong,
-.player-data small {
+.player-data > strong,
+.eliminated-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.player-data strong {
+.player-data > strong {
   font-size: 11px;
 }
 
-.player-data small {
+.eliminated-label {
   color: var(--muted);
   font-size: 9px;
 }
+
+.player-metrics {
+  display: flex;
+  min-width: 0;
+  gap: 4px;
+}
+
+.player-metrics > span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 3px;
+  padding: 2px 5px;
+  border: 1px solid rgba(163, 199, 218, .11);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.player-metrics b {
+  color: #edf6f7;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.player-metrics small {
+  overflow: hidden;
+  color: #829ba7;
+  font-size: 7px;
+  letter-spacing: .025em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.player-metrics .supply {
+  border-color: color-mix(in srgb, var(--player) 24%, transparent);
+  background: color-mix(in srgb, var(--player) 8%, transparent);
+}
+
+.player-metrics .supply b { color: var(--accent); }
 
 .game-layout {
   display: grid;
@@ -697,7 +737,22 @@ input:hover {
   animation: border-flow 1.4s linear infinite;
 }
 
+.region.combat-source .region-boundary {
+  stroke: #75eee1;
+  stroke-width: 6px;
+  filter: drop-shadow(0 0 9px rgba(73, 214, 199, .95));
+  animation: combat-territory-pulse 520ms ease-in-out infinite alternate;
+}
+
+.region.combat-target .region-boundary {
+  stroke: #ff9b79;
+  stroke-width: 6px;
+  filter: drop-shadow(0 0 10px rgba(255, 107, 91, .95));
+  animation: combat-territory-pulse 520ms ease-in-out infinite alternate;
+}
+
 @keyframes border-flow { to { stroke-dashoffset: -34; } }
+@keyframes combat-territory-pulse { to { stroke-width: 8px; } }
 
 .region-marker {
   pointer-events: none;
@@ -795,6 +850,50 @@ input:hover {
   pointer-events: none;
   background: radial-gradient(circle at center, rgba(4, 12, 20, .28), transparent 58%);
   animation: combat-overlay-life 1100ms both;
+}
+
+.turn-notification {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  top: 54px;
+  left: 50%;
+  min-width: 210px;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 18px 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--turn-color) 52%, rgba(255, 255, 255, .12));
+  border-radius: 6px;
+  background: rgba(7, 18, 28, .94);
+  box-shadow: 0 12px 35px rgba(0, 0, 0, .42), 0 0 18px color-mix(in srgb, var(--turn-color) 20%, transparent);
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: turn-notification-life 900ms ease both;
+}
+
+.turn-notification > i {
+  width: 6px;
+  height: 32px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--turn-color);
+  box-shadow: 0 0 13px color-mix(in srgb, var(--turn-color) 65%, transparent);
+}
+
+.turn-notification > span { display: grid; gap: 2px; }
+.turn-notification small {
+  color: #829ba7;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.turn-notification strong { font-size: 13px; }
+
+@keyframes turn-notification-life {
+  0% { opacity: 0; transform: translate(-50%, -10px); }
+  13%, 78% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -5px); }
 }
 
 .combat-roll {
@@ -1276,7 +1375,7 @@ input:hover {
     display: flex;
     overflow-x: auto;
   }
-  .player-chip { min-width: 142px; }
+  .player-chip { min-width: 174px; }
 
   .game-layout { display: flex; flex-direction: column; }
   .map-stage { min-height: 57vh; }
@@ -1291,6 +1390,7 @@ input:hover {
   .end-turn { position: sticky; bottom: 6px; }
 
   .combat-overlay { padding: 12px; }
+  .turn-notification { top: 46px; min-width: 190px; padding-block: 8px; }
   .combat-roll { width: 100%; grid-template-columns: minmax(0, 1fr) 58px minmax(0, 1fr); gap: 6px; }
   .combat-side { min-height: 118px; padding: 10px 8px; }
   .combat-dice { gap: 3px; }
