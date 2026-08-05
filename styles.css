@@ -489,6 +489,32 @@ input:hover {
   font-size: 18px;
 }
 
+.sound-toggle {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
+.sound-toggle svg {
+  width: 19px;
+  height: 19px;
+  fill: currentColor;
+}
+
+.sound-toggle .sound-waves {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.7px;
+}
+
+.sound-toggle.active {
+  border-color: rgba(73, 214, 199, .36);
+  color: var(--teal);
+}
+
+.sound-toggle.muted { color: #728894; }
+
 .players-bar {
   z-index: 3;
   display: grid;

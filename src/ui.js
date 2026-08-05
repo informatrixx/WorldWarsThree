@@ -1,4 +1,5 @@
 import { chooseAiAttack } from "./core/ai.js";
+import { SoundManager } from "./audio.js";
 import {
   createGame,
   deserializeGame,
@@ -104,6 +105,8 @@ export class GameApp {
     this.combatAnimationTimer = null;
     this.toast = null;
     this.toastTimer = null;
+    this.audio = new SoundManager();
+    this.announcedWinnerId = null;
     this.onKeyDown = this.onKeyDown.bind(this);
     window.addEventListener("keydown", this.onKeyDown);
   }
@@ -176,9 +179,32 @@ export class GameApp {
     `;
   }
 
+  renderSoundButton() {
+    const label = this.t(this.audio.enabled ? "soundOff" : "soundOn");
+    return `
+      <button type="button" class="icon-button sound-toggle ${this.audio.enabled ? "active" : "muted"}" data-sound-toggle
+        title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}" aria-pressed="${this.audio.enabled}">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9h4l5-4v14l-5-4H4z"/>
+          ${this.audio.enabled ? '<path class="sound-waves" d="M16 9q3 3 0 6M18.5 6.5q5.5 5.5 0 11"/>' : '<path class="sound-waves" d="m16 9 5 6m0-6-5 6"/>'}
+        </svg>
+      </button>
+    `;
+  }
+
   bindLanguageSwitches() {
     this.root.querySelectorAll("[data-locale]").forEach((button) => {
       button.addEventListener("click", () => this.setLocale(button.dataset.locale));
+    });
+  }
+
+  bindSoundToggles() {
+    this.root.querySelectorAll("[data-sound-toggle]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await this.audio.toggle();
+        if (this.state) this.renderGame();
+        else this.renderSetup();
+      });
     });
   }
 
@@ -195,7 +221,10 @@ export class GameApp {
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
             <span><strong>Dicefront</strong><small>Dominion</small></span>
           </a>
-          ${this.renderLanguageSwitch()}
+          <div class="header-actions">
+            ${this.renderLanguageSwitch()}
+            ${this.renderSoundButton()}
+          </div>
         </header>
         <section class="hero">
           <div class="hero-copy">
@@ -256,6 +285,7 @@ export class GameApp {
       </main>
     `;
     this.bindLanguageSwitches();
+    this.bindSoundToggles();
     this.root.querySelector("#random-seed").addEventListener("click", () => {
       this.root.querySelector("#seed-input").value = randomSeed();
     });
@@ -263,6 +293,8 @@ export class GameApp {
       this.state = this.savedState;
       this.locale = this.state.config.locale ?? this.locale;
       this.camera = null;
+      this.announcedWinnerId = null;
+      this.audio.setMatchActive(true);
       this.renderGame();
     });
     this.root.querySelector("#setup-form").addEventListener("submit", (event) => {
@@ -277,6 +309,8 @@ export class GameApp {
         locale: this.locale,
       });
       this.camera = null;
+      this.announcedWinnerId = null;
+      this.audio.setMatchActive(true);
       this.save();
       this.renderGame();
     });
@@ -517,6 +551,7 @@ export class GameApp {
           </div>
           <div class="header-actions">
             ${this.renderLanguageSwitch()}
+            ${this.renderSoundButton()}
             <button class="icon-button" id="new-game-button" title="${escapeHtml(this.t("newGame"))}" aria-label="${escapeHtml(this.t("newGame"))}">＋</button>
           </div>
         </header>
@@ -558,6 +593,7 @@ export class GameApp {
 
   bindGameEvents() {
     this.bindLanguageSwitches();
+    this.bindSoundToggles();
     this.root.querySelector("#home-link").addEventListener("click", (event) => {
       event.preventDefault();
       this.requestNewGame();
@@ -580,6 +616,7 @@ export class GameApp {
     });
     this.root.querySelector("#end-turn").addEventListener("click", () => this.finishHumanTurn());
     this.root.querySelector("#back-to-setup")?.addEventListener("click", () => {
+      this.audio.setMatchActive(false);
       this.clearSave();
       this.renderSetup();
     });
@@ -655,8 +692,10 @@ export class GameApp {
     const region = this.state.map.regions[regionId];
     if (region.ownerId === active.id) {
       if (region.units.length < 2) return;
+      const willSelect = this.selectedSource !== regionId;
       this.selectedSource = this.selectedSource === regionId ? null : regionId;
       this.selectedTarget = null;
+      if (willSelect) void this.audio.playSelection();
     } else if (this.selectedSource !== null && getLegalTargets(this.state, this.selectedSource).includes(regionId)) {
       this.selectedTarget = regionId;
       this.performAttack();
@@ -679,6 +718,7 @@ export class GameApp {
     if (!getActivePlayer(this.state).isHuman || this.state.phase !== "playing" || this.combatAnimation) return;
     this.selectedSource = null;
     this.selectedTarget = null;
+    void this.audio.playEndTurn();
     this.state = endTurn(this.state);
     this.save();
     this.renderGame();
@@ -712,12 +752,17 @@ export class GameApp {
 
   showCombatAnimation(battle, onComplete) {
     if (this.combatAnimationTimer) window.clearTimeout(this.combatAnimationTimer);
+    void this.audio.playBattle(battle.attackerWon);
     this.combatAnimation = { battle };
     this.renderGame();
     this.combatAnimationTimer = window.setTimeout(() => {
       this.combatAnimation = null;
       this.combatAnimationTimer = null;
       this.renderGame();
+      if (this.state.phase === "finished" && this.announcedWinnerId !== this.state.winnerId) {
+        this.announcedWinnerId = this.state.winnerId;
+        void this.audio.playGameEnd(this.state.winnerId === 0);
+      }
       onComplete?.();
     }, COMBAT_ANIMATION_MS);
   }
@@ -728,6 +773,8 @@ export class GameApp {
     if (this.combatAnimationTimer) window.clearTimeout(this.combatAnimationTimer);
     this.aiRunning = false;
     this.combatAnimation = null;
+    this.announcedWinnerId = null;
+    this.audio.setMatchActive(false);
     this.clearSave();
     this.renderSetup();
   }

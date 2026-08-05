@@ -41,9 +41,10 @@ Open `http://localhost:8080` afterwards. There is no build step and there are no
 ## Steuerung / Controls
 
 - Eigene Region und danach ein angrenzendes gegnerisches Ziel wählen.
-- Angriff in der Seitenleiste bestätigen oder die Auswahl mit `Esc` löschen.
+- Der Angriff beginnt direkt nach der Zielauswahl; mit `Esc` lässt sich eine offene Auswahl löschen.
 - Karte mit Maus/Finger verschieben, mit Mausrad oder den Schaltflächen zoomen.
 - `F` passt die gesamte Karte in die Ansicht ein.
+- Der Lautsprecher im Kopfbereich schaltet Soundeffekte und Schlachtfeldatmosphäre dauerhaft an oder aus.
 
 ## Entwicklung / Development
 
