@@ -179,9 +179,13 @@ test("capturing a headquarters eliminates the faction and transfers its territor
     defenderRolls: Array(target.units.length).fill(1),
   });
   assert.equal(result.state.players[defenderId].active, false);
+  assert.equal(result.state.players[defenderId].headquartersRegionId, null);
+  assert.equal(result.state.map.regions[targetId].isHeadquarters, false);
   assert.ok(result.state.map.regions.every((region) => region.ownerId !== defenderId));
   assert.equal(result.state.phase, "finished");
   assert.equal(result.state.winnerId, attackerId);
+  const restored = deserializeGame(serializeGame(result.state));
+  assert.equal(restored.map.regions[targetId].isHeadquarters, false);
 });
 
 test("end turn places reinforcements within the unit cap and advances play", () => {

@@ -387,9 +387,15 @@ export function resolveAttack(currentState, sourceId, targetId, options = {}) {
 
   source.units = [garrison];
   if (attackerWon) {
+    const capturedHeadquarters = target.isHeadquarters;
     target.ownerId = attackerId;
     target.units = remaining;
-    if (currentState.config.victoryMode === "headquarters" && target.isHeadquarters) {
+    if (capturedHeadquarters) {
+      target.isHeadquarters = false;
+      const defeated = state.players.find((player) => player.id === defenderId);
+      if (defeated?.headquartersRegionId === targetId) defeated.headquartersRegionId = null;
+    }
+    if (currentState.config.victoryMode === "headquarters" && capturedHeadquarters) {
       eliminatePlayer(state, defenderId, attackerId);
     }
   }
