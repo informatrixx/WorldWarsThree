@@ -51,6 +51,8 @@ test("player overview, turn notice, and combat territories expose tactical conte
   const targetId = source.neighbors[0];
   app.combatAnimation = { battle: { sourceId: source.id, targetId } };
   const map = app.renderMap();
+  assert.match(map, /class="region terrain-[^"]+ headquarters/);
+  assert.match(map, /class="hq-emblem"/);
   assert.match(map, /combat-source/);
   assert.match(map, /combat-target/);
 

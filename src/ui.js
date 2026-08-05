@@ -205,7 +205,8 @@ export class GameApp {
   bindSoundToggles() {
     this.root.querySelectorAll("[data-sound-toggle]").forEach((button) => {
       button.addEventListener("click", async () => {
-        await this.audio.toggle();
+        const ready = await this.audio.toggle();
+        if (this.audio.enabled && ready) await this.audio.playEnabledCue();
         if (this.state) this.renderGame();
         else this.renderSetup();
       });
@@ -394,6 +395,7 @@ export class GameApp {
         return `<polygon points="${polygon}" class="region-cell"/><polygon points="${polygon}" class="region-pattern"/>`;
       }).join("");
       const classes = [];
+      if (region.isHeadquarters) classes.push("headquarters");
       if (region.id === this.selectedSource) classes.push("selected-source");
       else if (legalTargets.includes(region.id)) classes.push("legal-target");
       if (region.id === this.combatAnimation?.battle.sourceId) classes.push("combat-source");
@@ -415,7 +417,7 @@ export class GameApp {
             ${renderTerrainBadge(region.terrain, this.t(region.terrain))}
             <circle class="unit-count-badge" cx="14" cy="4" r="15"/>
             <text class="unit-total" x="14" y="9">${region.units.length}</text>
-            ${region.isHeadquarters ? '<path class="hq-marker" d="M23-41 31-33 23-25 15-33Z"/><text class="hq-label" x="23" y="-30">HQ</text>' : ""}
+            ${region.isHeadquarters ? '<g class="hq-emblem"><circle class="hq-halo" cx="0" cy="-46" r="16"/><path class="hq-marker" d="M-16-53 0-61 16-53 13-36 0-30-13-36Z"/><path class="hq-star" d="M0-56 3-50 10-49 5-44 6-37 0-40-6-37-5-44-10-49-3-50Z"/><text class="hq-label" x="0" y="-45">HQ</text></g>' : ""}
             <text class="unit-mix" y="34">●${counts.infantry} ◆${counts.armor} ▲${counts.artillery}</text>
           </g>
         </g>
@@ -805,6 +807,7 @@ export class GameApp {
     if (this.turnNotificationTimer) window.clearTimeout(this.turnNotificationTimer);
     const active = getActivePlayer(this.state);
     this.turnNotification = { playerId: active.id, round: this.state.turn.round };
+    void this.audio.playTurnStart(active.isHuman);
     this.renderGame();
     this.turnNotificationTimer = window.setTimeout(() => {
       this.turnNotification = null;

@@ -82,6 +82,8 @@ test("sound starts enabled, creates ambience, and persists mute", async () => {
   assert.ok(environment.timers.size >= 1, "distant impact must be scheduled");
 
   await manager.playSelection();
+  await manager.playEnabledCue();
+  await manager.playTurnStart(true);
   await manager.playBattle(true);
   assert.ok(manager.context.nodes.some((node) => node.kind === "oscillator" && node.started));
   assert.ok(manager.effectTimers.size >= 1, "battle result must be synchronized");

@@ -724,6 +724,12 @@ input:hover {
   pointer-events: none;
 }
 
+.region.headquarters .region-boundary {
+  stroke: #ffd96b;
+  stroke-width: 5px;
+  filter: drop-shadow(0 0 5px rgba(255, 211, 91, .72));
+}
+
 .region.selected-source .region-boundary {
   stroke: #fff8cc;
   stroke-width: 6px;
@@ -809,17 +815,40 @@ input:hover {
   text-anchor: middle;
 }
 
+.hq-emblem {
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .85));
+}
+
+.hq-halo {
+  fill: rgba(255, 216, 106, .16);
+  stroke: rgba(255, 235, 164, .82);
+  stroke-width: 2px;
+  animation: hq-pulse 1.8s ease-in-out infinite alternate;
+}
+
 .hq-marker {
-  fill: var(--gold);
-  stroke: #251704;
-  stroke-width: 1.5px;
+  fill: #f4bd3f;
+  stroke: #fff0ad;
+  stroke-width: 1.8px;
+}
+
+.hq-star {
+  fill: #5b3700;
+  opacity: .5;
 }
 
 .hq-label {
-  fill: #211501;
-  font-size: 5.5px;
+  fill: #1b1101;
+  paint-order: stroke;
+  stroke: rgba(255, 234, 158, .75);
+  stroke-width: 1px;
+  font-size: 8px;
   font-weight: 950;
   text-anchor: middle;
+}
+
+@keyframes hq-pulse {
+  to { r: 19px; opacity: .68; }
 }
 
 .map-controls {

@@ -1,8 +1,8 @@
 export const SOUND_STORAGE_KEY = "dicefront-dominion:sound:v1";
 
-const MASTER_GAIN = 0.32;
-const EFFECT_GAIN = 0.55;
-const AMBIENT_GAIN = 0.07;
+const MASTER_GAIN = 0.68;
+const EFFECT_GAIN = 0.82;
+const AMBIENT_GAIN = 0.12;
 
 function safeStop(node) {
   try { node.stop(); } catch { /* The node may already be stopped. */ }
@@ -30,12 +30,24 @@ export class SoundManager {
     this.ambientNodes = [];
     this.ambientTimer = null;
     this.effectTimers = new Set();
+    this.onFirstInteraction = () => {
+      void this.unlock().then((ready) => {
+        if (ready) this.removeInteractionListeners();
+      });
+    };
     this.onVisibilityChange = () => {
       this.pageVisible = !this.documentRef?.hidden;
       if (this.pageVisible) void this.unlock();
       else this.stopAmbientNodes();
     };
     this.documentRef?.addEventListener?.("visibilitychange", this.onVisibilityChange);
+    this.documentRef?.addEventListener?.("pointerdown", this.onFirstInteraction, { capture: true });
+    this.documentRef?.addEventListener?.("keydown", this.onFirstInteraction, { capture: true });
+  }
+
+  removeInteractionListeners() {
+    this.documentRef?.removeEventListener?.("pointerdown", this.onFirstInteraction, { capture: true });
+    this.documentRef?.removeEventListener?.("keydown", this.onFirstInteraction, { capture: true });
   }
 
   loadEnabled() {
@@ -93,7 +105,7 @@ export class SoundManager {
       }
     }
     try {
-      if (this.context.state === "suspended") await this.context.resume();
+      if (this.context.state !== "running" && this.context.state !== "closed") await this.context.resume();
     } catch {
       return false;
     }
@@ -231,7 +243,23 @@ export class SoundManager {
   }
 
   playSelection() {
-    return this.play(() => this.tone({ frequency: 230, endFrequency: 285, duration: 0.075, gain: 0.045 }));
+    return this.play(() => this.tone({ frequency: 230, endFrequency: 285, duration: 0.075, gain: 0.07 }));
+  }
+
+  playEnabledCue() {
+    return this.play(() => {
+      this.tone({ frequency: 330, endFrequency: 440, duration: .13, gain: .09, type: "triangle" });
+      this.tone({ frequency: 440, endFrequency: 550, duration: .16, gain: .075, type: "triangle", delay: .1 });
+    });
+  }
+
+  playTurnStart(humanTurn) {
+    return this.play(() => {
+      const first = humanTurn ? 294 : 220;
+      const second = humanTurn ? 440 : 277;
+      this.tone({ frequency: first, endFrequency: first, duration: .16, gain: .085, type: "triangle" });
+      this.tone({ frequency: second, endFrequency: second, duration: .2, gain: .075, type: "triangle", delay: .12 });
+    });
   }
 
   playBattle(attackerWon) {
@@ -292,6 +320,7 @@ export class SoundManager {
   destroy() {
     this.stopAmbientNodes();
     this.clearEffectTimers();
+    this.removeInteractionListeners();
     this.documentRef?.removeEventListener?.("visibilitychange", this.onVisibilityChange);
     try { this.context?.close(); } catch { /* Closing is best effort. */ }
   }
