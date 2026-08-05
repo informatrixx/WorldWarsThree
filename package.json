@@ -1,0 +1,14 @@
+{
+  "name": "dicefront-dominion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A dependency-free, turn-based browser strategy game.",
+  "scripts": {
+    "check": "node --check src/main.js && node --check src/ui.js && node --check src/core/game.js && node --check src/core/map-generator.js && node --check src/core/ai.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
