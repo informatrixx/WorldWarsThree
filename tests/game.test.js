@@ -75,6 +75,24 @@ test("starting ownership, unit totals, and class composition are balanced", () =
   }
 });
 
+test("AI commanders receive unique deterministic parody names without affecting the human", () => {
+  const first = createGame(gameConfig({ playerCount: 6, seed: "commander-name-test" }));
+  const same = createGame(gameConfig({ playerCount: 6, seed: "commander-name-test" }));
+  const different = createGame(gameConfig({ playerCount: 6, seed: "other-commander-name-test" }));
+  const names = first.players.slice(1).map((player) => player.commanderName);
+
+  assert.equal(first.players[0].commanderName, undefined);
+  assert.equal(new Set(names).size, names.length);
+  assert.deepEqual(names, same.players.slice(1).map((player) => player.commanderName));
+  assert.notDeepEqual(names, different.players.slice(1).map((player) => player.commanderName));
+  assert.ok(names.every((name) => typeof name === "string" && name.length > 0));
+
+  const unnamedSave = structuredClone(first);
+  unnamedSave.players.forEach((player) => { delete player.commanderName; });
+  const restored = deserializeGame(JSON.stringify(unnamedSave));
+  assert.deepEqual(restored.players.slice(1).map((player) => player.commanderName), names);
+});
+
 test("headquarters are structurally unreachable throughout the first round", () => {
   for (const mapSize of ["small", "medium", "large"]) {
     for (let playerCount = 2; playerCount <= 6; playerCount += 1) {
@@ -427,8 +445,5 @@ test("valid games round-trip and invalid save data is rejected", () => {
   delete versionOne.config.cardsEnabled;
   delete versionOne.cards;
   versionOne.players.forEach((player) => { delete player.hand; });
-  const migrated = deserializeGame(JSON.stringify(versionOne));
-  assert.equal(migrated.schemaVersion, 2);
-  assert.equal(migrated.config.cardsEnabled, false);
-  assert.ok(migrated.players.every((player) => player.hand.length === 0));
+  assert.equal(deserializeGame(JSON.stringify(versionOne)), null);
 });

@@ -1,7 +1,7 @@
-import { generateMap, MAP_SIZES } from "./map-generator.js";
+import { generateMap, MAP_SIZES, MIN_REGION_CELLS } from "./map-generator.js";
 import { randomSeed, SeededRandom } from "./random.js";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const UNIT_CAP = 8;
 export const UNIT_TYPES = Object.freeze(["infantry", "armor", "artillery"]);
 export const TERRAIN_TYPES = Object.freeze(["plains", "forest", "hills", "city"]);
@@ -16,6 +16,34 @@ export const CARD_TYPES = Object.freeze([
   "luckyRoll",
   "mobilization",
 ]);
+
+const COMMANDER_NAMES = Object.freeze([
+  "Napoleon Bonbonparte",
+  "Hanniball Bärka",
+  "Julius Käsear",
+  "Alexander der Krümelige",
+  "Sun Tzatziki",
+  "Dschingis Kännchen",
+  "Horatio Nudelson",
+  "Arthur Waffley",
+  "Scipio Africappuccino",
+  "Georg von Knödelwitz",
+  "Friedrich der Große Hunger",
+  "Gustav Adolfsenf",
+  "Tokugawa Ieyasuppe",
+  "Yi Sun-Sinfonie",
+  "Salatdin der Kühne",
+  "Belisar Bällchen",
+  "Jan Sobieskeks",
+  "Subutai Suboptimal",
+]);
+
+function assignCommanderNames(players, seed) {
+  const names = new SeededRandom(`${seed}:commander-names`).shuffle(COMMANDER_NAMES);
+  players.filter((player) => !player.isHuman).forEach((player, index) => {
+    player.commanderName = names[index];
+  });
+}
 export const CARD_HAND_LIMIT = 3;
 export const CARD_DECK_COUNTS = Object.freeze({
   supplyDrop: 6,
@@ -319,6 +347,7 @@ export function createGame(inputConfig = {}) {
     headquartersRegionId: null,
     hand: [],
   }));
+  assignCommanderNames(players, config.seed);
   const regionDistances = assignOwnersAndHeadquarters(map.regions, players, rng);
   assignBalancedTerrain(map.regions, players, rng);
   const startingUnitBudget = assignBalancedUnits(map.regions, players, regionDistances, rng);
@@ -889,6 +918,9 @@ export function validateGameState(state) {
   if (!state.players.every((player, index) => (
     Array.isArray(player.hand)
     && player.hand.length <= CARD_HAND_LIMIT + (index === state.turn.activePlayerIndex ? 1 : 0)
+    && (player.commanderName === undefined || (
+      typeof player.commanderName === "string" && player.commanderName.length >= 1 && player.commanderName.length <= 80
+    ))
   ))) return false;
   const cardContainers = [
     ...state.cards.drawPile,
@@ -911,6 +943,7 @@ export function validateGameState(state) {
     region.id === index
     && Array.isArray(region.neighbors)
     && Array.isArray(region.cells)
+    && region.cells.length >= MIN_REGION_CELLS
     && Array.isArray(region.units)
     && region.units.length >= 1
     && region.units.length <= UNIT_CAP
@@ -922,15 +955,10 @@ export function validateGameState(state) {
 
 export function deserializeGame(serialized) {
   try {
-    let state = JSON.parse(serialized);
-    if (state?.schemaVersion === 1 && state.config && Array.isArray(state.players)) {
-      state = clone(state);
-      state.schemaVersion = SCHEMA_VERSION;
-      state.config.cardsEnabled = false;
-      state.players.forEach((player) => { player.hand = []; });
-      state.cards = { drawPile: [], discardPile: [], effects: [] };
-    }
-    return validateGameState(state) ? state : null;
+    const state = JSON.parse(serialized);
+    if (!validateGameState(state)) return null;
+    assignCommanderNames(state.players, state.config.seed);
+    return state;
   } catch {
     return null;
   }

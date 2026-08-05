@@ -7,6 +7,7 @@ export const MAP_SIZES = Object.freeze({
 });
 
 export const HEX_SIZE = 25;
+export const MIN_REGION_CELLS = 4;
 
 const DIRECTIONS = Object.freeze([
   [1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1],
@@ -139,7 +140,7 @@ function growConnectedLand(land, target, rng) {
 }
 
 function createLand(targetRegions, profile, rng) {
-  const targetCells = targetRegions * 5;
+  const targetCells = targetRegions * 6;
   const lobeCount = profile === "open" ? 1 : profile === "mixed" ? 2 : 3;
   const land = new Set();
   const centers = [];
@@ -147,7 +148,7 @@ function createLand(targetRegions, profile, rng) {
   const quota = Math.ceil(targetCells * quotaRatio);
   const approximateRadius = Math.sqrt(quota / 3);
   const spread = profile === "open" ? 0 : Math.ceil(
-    approximateRadius * (profile === "mixed" ? 0.65 : 0.95),
+    approximateRadius * (profile === "mixed" ? 0.65 : 1.25),
   );
 
   for (let index = 0; index < lobeCount; index += 1) {
@@ -166,7 +167,7 @@ function createLand(targetRegions, profile, rng) {
 
   if (centers.length > 1) {
     for (let index = 1; index < centers.length; index += 1) {
-      addCorridor(land, centers[index - 1], centers[index], 2, rng);
+      addCorridor(land, centers[index - 1], centers[index], profile === "fractured" ? 1 : 2, rng);
     }
   }
   growConnectedLand(land, targetCells, rng);
@@ -199,22 +200,101 @@ function partitionLand(land, regionCount, rng) {
     const [q, r] = parseCellKey(key);
     return { q, r };
   });
-  const seeds = selectRegionSeeds(cells, regionCount, rng);
-  const assignment = new Map();
-  const queue = rng.shuffle(seeds.map((cell, regionId) => ({ cell, regionId })));
-  queue.forEach(({ cell, regionId }) => assignment.set(cellKey(cell.q, cell.r), regionId));
+  const cellsByKey = new Map(cells.map((cell) => [cellKey(cell.q, cell.r), cell]));
 
-  for (let cursor = 0; cursor < queue.length; cursor += 1) {
-    const { cell, regionId } = queue[cursor];
-    for (const neighbor of rng.shuffle(adjacentCells(cell))) {
-      const key = cellKey(neighbor.q, neighbor.r);
-      if (!land.has(key) || assignment.has(key)) continue;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const seeds = selectRegionSeeds(cells, regionCount, rng);
+    const assignment = new Map();
+    const regionKeys = Array.from({ length: regionCount }, () => new Set());
+    seeds.forEach((cell, regionId) => {
+      const key = cellKey(cell.q, cell.r);
       assignment.set(key, regionId);
-      queue.push({ cell: neighbor, regionId });
+      regionKeys[regionId].add(key);
+    });
+
+    let failed = false;
+    while (regionKeys.some((keys) => keys.size < MIN_REGION_CELLS)) {
+      const constrained = regionKeys
+        .map((keys, regionId) => {
+          if (keys.size >= MIN_REGION_CELLS) return null;
+          const candidates = new Map();
+          for (const key of keys) {
+            const cell = cellsByKey.get(key);
+            for (const neighbor of adjacentCells(cell)) {
+              const neighborKey = cellKey(neighbor.q, neighbor.r);
+              if (cellsByKey.has(neighborKey) && !assignment.has(neighborKey)) {
+                candidates.set(neighborKey, neighbor);
+              }
+            }
+          }
+          return { regionId, keys, candidates: [...candidates.values()] };
+        })
+        .filter(Boolean)
+        .sort((first, second) => (
+          first.candidates.length - second.candidates.length
+          || first.keys.size - second.keys.size
+          || first.regionId - second.regionId
+        ));
+      const nextRegion = constrained[0];
+      if (!nextRegion?.candidates.length) {
+        failed = true;
+        break;
+      }
+      const seed = seeds[nextRegion.regionId];
+      const selected = rng.weighted(nextRegion.candidates.map((cell) => {
+        const friendlyNeighbors = adjacentCells(cell).filter((neighbor) => (
+          nextRegion.keys.has(cellKey(neighbor.q, neighbor.r))
+        )).length;
+        return {
+          cell,
+          weight: (1 + friendlyNeighbors ** 2 * 2.4) / (1 + hexDistance(seed, cell) * 0.2),
+        };
+      })).cell;
+      const selectedKey = cellKey(selected.q, selected.r);
+      assignment.set(selectedKey, nextRegion.regionId);
+      regionKeys[nextRegion.regionId].add(selectedKey);
     }
+    if (failed) continue;
+
+    while (assignment.size < cells.length) {
+      const candidates = cells.filter((cell) => {
+        const key = cellKey(cell.q, cell.r);
+        return !assignment.has(key) && adjacentCells(cell).some((neighbor) => (
+          assignment.has(cellKey(neighbor.q, neighbor.r))
+        ));
+      });
+      if (!candidates.length) {
+        failed = true;
+        break;
+      }
+      const selected = rng.weighted(candidates.map((cell) => {
+        const assignedNeighbors = adjacentCells(cell).filter((neighbor) => (
+          assignment.has(cellKey(neighbor.q, neighbor.r))
+        ));
+        return { cell, weight: 1 + assignedNeighbors.length ** 2 };
+      })).cell;
+      const neighborRegions = [...new Set(adjacentCells(selected)
+        .map((neighbor) => assignment.get(cellKey(neighbor.q, neighbor.r)))
+        .filter((regionId) => regionId !== undefined))];
+      const regionId = neighborRegions.sort((first, second) => {
+        const firstFriendly = adjacentCells(selected).filter((neighbor) => (
+          assignment.get(cellKey(neighbor.q, neighbor.r)) === first
+        )).length;
+        const secondFriendly = adjacentCells(selected).filter((neighbor) => (
+          assignment.get(cellKey(neighbor.q, neighbor.r)) === second
+        )).length;
+        return secondFriendly - firstFriendly
+          || regionKeys[first].size - regionKeys[second].size
+          || first - second;
+      })[0];
+      const selectedKey = cellKey(selected.q, selected.r);
+      assignment.set(selectedKey, regionId);
+      regionKeys[regionId].add(selectedKey);
+    }
+    if (!failed) return { cells, assignment };
   }
 
-  return { cells, assignment };
+  throw new Error(`Unable to create ${regionCount} regions with ${MIN_REGION_CELLS} cells each`);
 }
 
 function buildRegions(cells, assignment, count) {

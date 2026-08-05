@@ -713,6 +713,100 @@ input:hover {
   white-space: nowrap;
 }
 
+.map-meta .reseed-map {
+  border-color: rgba(255, 207, 112, .42);
+  color: #ffcf70;
+}
+
+.map-meta .reseed-map:hover {
+  border-color: #ffcf70;
+  background: rgba(76, 52, 18, .88);
+}
+
+.ranking-panel {
+  padding: 13px;
+}
+
+.ranking-list {
+  display: grid;
+  gap: 6px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ranking-entry {
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr) auto;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px 6px 6px;
+  border: 1px solid color-mix(in srgb, var(--rank-color) 72%, #d9eef0);
+  border-left-width: 5px;
+  border-radius: 7px;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--rank-color) 43%, rgba(7, 17, 27, .96)),
+    color-mix(in srgb, var(--rank-color) 15%, rgba(7, 17, 27, .96)));
+  box-shadow: inset 0 0 18px color-mix(in srgb, var(--rank-color) 12%, transparent);
+}
+
+.ranking-entry.inactive {
+  opacity: .46;
+  filter: grayscale(.45);
+}
+
+.ranking-position {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--rank-accent) 70%, transparent);
+  border-radius: 50%;
+  background: rgba(4, 12, 18, .7);
+  color: var(--rank-accent);
+  font: 900 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.ranking-name {
+  overflow: hidden;
+  color: #f5fbfb;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ranking-metrics {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ranking-territories,
+.ranking-units {
+  display: grid;
+  min-width: 31px;
+  color: white;
+  font: 950 16px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: right;
+}
+
+.ranking-territories small,
+.ranking-units small {
+  margin-top: 3px;
+  color: color-mix(in srgb, var(--rank-accent) 72%, #d8e2e4);
+  font-size: 6px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ranking-units {
+  padding-left: 8px;
+  border-left: 1px solid color-mix(in srgb, var(--rank-accent) 28%, transparent);
+}
+
 #battle-map {
   position: relative;
   z-index: 2;
@@ -817,94 +911,154 @@ input:hover {
 @keyframes border-flow { to { stroke-dashoffset: -34; } }
 @keyframes combat-territory-pulse { to { stroke-width: 8px; } }
 
+.map-combat-direction,
+.ai-attack-arrow {
+  pointer-events: none;
+}
+
+.ai-arrow-shadow,
+.ai-arrow-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ai-arrow-shadow {
+  stroke: rgba(3, 10, 16, .82);
+  stroke-width: 9px;
+}
+
+.ai-arrow-line {
+  stroke: #ffcf70;
+  stroke-width: 4px;
+  stroke-dasharray: 9 7;
+  filter: drop-shadow(0 0 4px rgba(255, 132, 74, .9));
+  animation: ai-arrow-march 360ms linear infinite;
+}
+
+.ai-arrow-origin {
+  fill: rgba(255, 207, 112, .22);
+  stroke: #ffcf70;
+  stroke-width: 2px;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ai-arrow-pulse 520ms ease-in-out infinite alternate;
+}
+
+@keyframes ai-arrow-march { to { stroke-dashoffset: -16; } }
+@keyframes ai-arrow-pulse { to { opacity: .4; transform: scale(1.45); } }
+
 .region-marker {
   pointer-events: none;
 }
 
-.territory-token {
-  transform-box: fill-box;
-  transform-origin: center;
-  filter: drop-shadow(0 4px 5px rgba(0, 0, 0, .72));
-  transition: transform 140ms ease, filter 140ms ease;
+.territory-formation {
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .52));
+  transition: filter 140ms ease;
 }
 
-.map-detail-overview .territory-token { transform: scale(.8); }
-.map-detail-tactical .territory-token { transform: scale(.94); }
-.region.selected-source .territory-token,
-.region.selected-card-source .territory-token,
-.region.legal-target .territory-token,
-.region.card-target .territory-token {
-  filter: drop-shadow(0 5px 7px rgba(0, 0, 0, .82)) drop-shadow(0 0 5px rgba(255, 255, 255, .24));
-  transform: scale(1);
-}
-
-.territory-token-bg {
-  fill: rgba(5, 13, 20, .94);
-  stroke: var(--region-accent);
-  stroke-width: 1.7px;
-}
-
-.region.headquarters .territory-token-bg {
-  stroke: #ffd96b;
-  stroke-width: 2.2px;
-}
-
-.token-terrain rect {
-  fill: rgba(17, 29, 36, .98);
-  stroke: rgba(235, 245, 245, .35);
-  stroke-width: 1.3px;
+.region-marker-owner.selected-source .territory-formation,
+.region-marker-owner.selected-card-source .territory-formation,
+.region-marker-owner.legal-target .territory-formation,
+.region-marker-owner.card-target .territory-formation {
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .7)) drop-shadow(0 0 4px rgba(255, 255, 255, .35));
 }
 
 .terrain-token-shape {
   fill: none;
-  stroke: #dce9e5;
+  stroke: #f3f7e9;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.8px;
+  stroke-width: 2.2px;
+  paint-order: stroke;
+  filter: drop-shadow(0 1px 1px rgba(5, 13, 18, .9));
 }
 
 .terrain-forest .terrain-token-shape {
-  fill: #b9dfc4;
-  stroke: #b9dfc4;
+  fill: #e5f4df;
+  stroke: #e5f4df;
 }
 
-.terrain-plains .terrain-token-shape { stroke: #d4dfad; }
-.terrain-hills .terrain-token-shape { stroke: #e5c18b; }
-.terrain-city .terrain-token-shape { stroke: #c9dbe3; }
+.terrain-plains .terrain-token-shape { stroke: #eff1c9; }
+.terrain-hills .terrain-token-shape { stroke: #ffe0a8; }
+.terrain-city .terrain-token-shape { stroke: #e3f1f5; }
 
 .unit-total {
-  fill: white;
+  fill: #fffdf2;
   paint-order: stroke;
-  stroke: rgba(1, 6, 9, .9);
-  stroke-width: 2px;
+  stroke: rgba(4, 13, 18, .94);
+  stroke-width: 3.2px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 20px;
   font-weight: 950;
   text-anchor: middle;
 }
 
-.force-type use {
-  fill: none;
-  stroke: #d9e8eb;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.45px;
-  vector-effect: non-scaling-stroke;
+.unit-total-bg {
+  fill: color-mix(in srgb, var(--region-color) 38%, rgba(4, 13, 18, .94));
+  stroke: rgba(255, 253, 242, .92);
+  stroke-width: 1.8px;
 }
 
-.force-infantry use { stroke: #b9dfc4; }
-.force-armor use { stroke: #a7d4ef; }
-.force-artillery use { stroke: #edc77f; }
+.region-marker-owner.headquarters .unit-total-bg {
+  stroke: #ffe28a;
+  stroke-width: 2.3px;
+}
+
+.force-image {
+  filter: drop-shadow(0 1px 0 rgba(246, 249, 231, .48)) drop-shadow(0 3px 2px rgba(5, 12, 16, .72));
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
 
 .force-count {
-  fill: #f4f8f8;
+  fill: #fffdf2;
   paint-order: stroke;
-  stroke: #061018;
-  stroke-width: 2.2px;
+  stroke: rgba(4, 13, 18, .96);
+  stroke-width: 2.8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 8.5px;
+  font-size: 9px;
   font-weight: 950;
   text-anchor: middle;
+  transition: opacity 120ms ease;
+}
+
+.force-count-bg {
+  fill: rgba(4, 13, 18, .9);
+  stroke: rgba(255, 253, 242, .9);
+  stroke-width: 1.25px;
+  transition: opacity 120ms ease;
+}
+
+.map-detail-overview .force-image {
+  opacity: .82;
+  transform: scale(.86);
+}
+
+.map-detail-overview .force-count,
+.map-detail-overview .force-count-bg { opacity: 0; }
+
+.map-detail-overview .region-marker-owner.selected-source .force-image,
+.map-detail-overview .region-marker-owner.selected-card-source .force-image,
+.map-detail-overview .region-marker-owner.legal-target .force-image,
+.map-detail-overview .region-marker-owner.card-target .force-image {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.map-detail-overview .region-marker-owner.selected-source .force-count,
+.map-detail-overview .region-marker-owner.selected-card-source .force-count,
+.map-detail-overview .region-marker-owner.legal-target .force-count,
+.map-detail-overview .region-marker-owner.card-target .force-count {
+  opacity: 1;
+}
+
+.map-detail-overview .region-marker-owner.selected-source .force-count-bg,
+.map-detail-overview .region-marker-owner.selected-card-source .force-count-bg,
+.map-detail-overview .region-marker-owner.legal-target .force-count-bg,
+.map-detail-overview .region-marker-owner.card-target .force-count-bg {
+  opacity: 1;
 }
 
 .combat-modifier {

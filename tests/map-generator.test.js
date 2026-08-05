@@ -5,8 +5,29 @@ import {
   articulationPoints,
   generateMap,
   MAP_SIZES,
+  MIN_REGION_CELLS,
   regionGraphIsConnected,
 } from "../src/core/map-generator.js";
+
+const DIRECTIONS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+
+function regionCellsAreConnected(region) {
+  const keys = new Set(region.cells.map((cell) => `${cell.q},${cell.r}`));
+  const first = region.cells[0];
+  const visited = new Set([`${first.q},${first.r}`]);
+  const queue = [first];
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const cell = queue[cursor];
+    for (const [dq, dr] of DIRECTIONS) {
+      const key = `${cell.q + dq},${cell.r + dr}`;
+      if (keys.has(key) && !visited.has(key)) {
+        visited.add(key);
+        queue.push({ q: cell.q + dq, r: cell.r + dr });
+      }
+    }
+  }
+  return visited.size === region.cells.length;
+}
 
 test("the same seed creates the same map", () => {
   const first = generateMap({ size: "medium", seed: "repeatable" });
@@ -19,8 +40,9 @@ test("all supported sizes create a connected, symmetric region graph", () => {
       const map = generateMap({ size, seed: `${size}-${index}` });
       assert.equal(map.regions.length, expected);
       assert.equal(regionGraphIsConnected(map.regions), true);
-      assert.ok(map.regions.every((region) => region.cells.length > 0));
+      assert.ok(map.regions.every((region) => region.cells.length >= MIN_REGION_CELLS));
       for (const region of map.regions) {
+        assert.equal(regionCellsAreConnected(region), true);
         assert.ok(region.neighbors.length > 0);
         for (const neighbor of region.neighbors) {
           assert.ok(map.regions[neighbor].neighbors.includes(region.id));

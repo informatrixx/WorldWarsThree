@@ -61,7 +61,9 @@ export const translations = {
     human: "Du",
     aiPlayer: "KI-Kommandant {number}",
     territories: "{count} Gebiete",
+    ranking: "Rangliste",
     territoryMetric: "Gebiete",
+    troopMetric: "Truppen",
     supplyMetric: "Nachschub",
     cardsMetric: "Karten",
     cardCount: "{count} Karten auf der Hand",
@@ -100,6 +102,8 @@ export const translations = {
     zoomOut: "Verkleinern",
     copySeed: "Seed kopieren",
     seedCopied: "Seed kopiert",
+    reseedMap: "Andere Karte",
+    reseedMapTitle: "Diese Karte verwerfen und sofort eine neue erzeugen",
     helpTitle: "Kurzregeln",
     helpText: "Eigene Region wählen, dann ein angrenzendes Feindgebiet. Jede Einheit würfelt W6; die höhere Summe gewinnt. Gleichstand gewinnt die Verteidigung.",
     cardsHint: "Karte wählen und das markierte Gebiet anklicken.",
@@ -194,7 +198,9 @@ export const translations = {
     human: "You",
     aiPlayer: "AI Commander {number}",
     territories: "{count} territories",
+    ranking: "Ranking",
     territoryMetric: "Territories",
+    troopMetric: "Troops",
     supplyMetric: "Supply",
     cardsMetric: "Cards",
     cardCount: "{count} cards in hand",
@@ -233,6 +239,8 @@ export const translations = {
     zoomOut: "Zoom out",
     copySeed: "Copy seed",
     seedCopied: "Seed copied",
+    reseedMap: "Different map",
+    reseedMapTitle: "Reject this map and immediately generate another one",
     helpTitle: "Quick rules",
     helpText: "Select your region, then an adjacent enemy territory. Every unit rolls a D6; the higher total wins. Ties favor the defender.",
     cardsHint: "Choose a card, then click a highlighted territory.",
@@ -278,5 +286,5 @@ export function playerName(state, playerId, locale = state.config.locale) {
   if (!player) return "—";
   return player.isHuman
     ? translate(locale, "human")
-    : translate(locale, "aiPlayer", { number: player.id });
+    : player.commanderName ?? translate(locale, "aiPlayer", { number: player.id });
 }
