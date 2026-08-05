@@ -3,6 +3,78 @@ export const SOUND_STORAGE_KEY = "dicefront-dominion:sound:v1";
 const MASTER_GAIN = 0.68;
 const EFFECT_GAIN = 0.82;
 const AMBIENT_GAIN = 0.12;
+const CLIP_SAMPLE_RATE = 22050;
+
+const CLIP_RECIPES = {
+  selection: { duration: .14, tones: [[0, .12, 320, 430, .48, "triangle"]] },
+  enabled: { duration: .38, tones: [[0, .18, 392, 494, .48, "triangle"], [.15, .2, 523, 659, .42, "triangle"]] },
+  "turn-human": { duration: .44, tones: [[0, .2, 330, 330, .48, "triangle"], [.16, .24, 494, 494, .44, "triangle"]] },
+  "turn-ai": { duration: .42, tones: [[0, .18, 247, 220, .4, "triangle"], [.15, .22, 294, 277, .36, "triangle"]] },
+  "end-turn": { duration: .4, tones: [[0, .24, 350, 230, .45, "triangle"], [.08, .25, 270, 180, .34, "triangle"]] },
+  "battle-win": {
+    duration: 1.05,
+    tones: [[.52, .3, 196, 294, .44, "triangle"], [.65, .32, 294, 440, .36, "triangle"]],
+    noise: [[0, .08, .5], [.1, .08, .48], [.21, .09, .52], [.33, .09, .46], [.45, .1, .42]],
+  },
+  "battle-loss": {
+    duration: .95,
+    tones: [[.5, .38, 180, 72, .52, "triangle"]],
+    noise: [[0, .09, .5], [.12, .09, .48], [.25, .1, .45], [.39, .11, .4]],
+  },
+  "game-win": { duration: 1, tones: [[0, .45, 262, 262, .42, "sine"], [.18, .5, 330, 330, .4, "sine"], [.38, .55, 392, 392, .38, "sine"]] },
+  "game-loss": { duration: 1, tones: [[0, .45, 220, 196, .45, "triangle"], [.2, .5, 165, 147, .4, "triangle"], [.4, .52, 110, 82, .38, "triangle"]] },
+};
+
+function addTone(samples, start, duration, startFrequency, endFrequency, amplitude, type) {
+  const first = Math.floor(start * CLIP_SAMPLE_RATE);
+  const count = Math.floor(duration * CLIP_SAMPLE_RATE);
+  let phase = 0;
+  for (let index = 0; index < count && first + index < samples.length; index += 1) {
+    const progress = index / Math.max(1, count - 1);
+    phase += (Math.PI * 2 * (startFrequency + (endFrequency - startFrequency) * progress)) / CLIP_SAMPLE_RATE;
+    const envelope = Math.sin(Math.PI * progress) ** .7;
+    const wave = type === "triangle" ? (2 / Math.PI) * Math.asin(Math.sin(phase)) : Math.sin(phase);
+    samples[first + index] += wave * envelope * amplitude;
+  }
+}
+
+function addNoise(samples, start, duration, amplitude, seed) {
+  const first = Math.floor(start * CLIP_SAMPLE_RATE);
+  const count = Math.floor(duration * CLIP_SAMPLE_RATE);
+  let value = seed || 1;
+  let previous = 0;
+  for (let index = 0; index < count && first + index < samples.length; index += 1) {
+    value = (value * 1664525 + 1013904223) >>> 0;
+    previous = previous * .42 + ((value / 0xffffffff) * 2 - 1) * .58;
+    const progress = index / Math.max(1, count - 1);
+    samples[first + index] += previous * (1 - progress) ** 1.6 * amplitude;
+  }
+}
+
+function createWavBytes(name) {
+  const recipe = CLIP_RECIPES[name];
+  if (!recipe) throw new Error(`Unknown audio clip: ${name}`);
+  const samples = new Float32Array(Math.ceil(recipe.duration * CLIP_SAMPLE_RATE));
+  recipe.tones?.forEach((tone) => addTone(samples, ...tone));
+  recipe.noise?.forEach((noise, index) => addNoise(samples, ...noise, index + 1));
+  const bytes = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(bytes);
+  const write = (offset, text) => [...text].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
+  write(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  write(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, CLIP_SAMPLE_RATE, true);
+  view.setUint32(28, CLIP_SAMPLE_RATE * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  samples.forEach((sample, index) => view.setInt16(44 + index * 2, Math.max(-1, Math.min(1, sample)) * 0x7fff, true));
+  return bytes;
+}
 
 function safeStop(node) {
   try { node.stop(); } catch { /* The node may already be stopped. */ }
@@ -30,6 +102,9 @@ export class SoundManager {
     this.ambientNodes = [];
     this.ambientTimer = null;
     this.effectTimers = new Set();
+    this.mediaClips = new Map();
+    this.activeMedia = new Set();
+    this.lastPlaybackError = null;
     this.onFirstInteraction = () => {
       void this.unlock().then((ready) => {
         if (ready) this.removeInteractionListeners();
@@ -72,6 +147,7 @@ export class SoundManager {
     if (!this.enabled) {
       this.stopAmbientNodes();
       this.clearEffectTimers();
+      this.stopMedia();
       if (this.master) this.master.gain.setValueAtTime(0, this.context.currentTime);
       return false;
     }
@@ -201,11 +277,56 @@ export class SoundManager {
   }
 
   play(effect) {
-    if (!this.enabled) return Promise.resolve(false);
-    return this.unlock().then((ready) => {
-      if (ready && this.enabled) effect(this.context);
-      return ready;
+    return this.playWithClip(null, effect);
+  }
+
+  async playWithClip(clipName, effect) {
+    if (!this.enabled) return false;
+    const mediaPlayback = clipName ? this.playMedia(clipName) : Promise.resolve(false);
+    const [mediaPlayed, ready] = await Promise.all([mediaPlayback, this.unlock()]);
+    if (mediaPlayed) return true;
+    if (ready && this.enabled) effect(this.context);
+    return ready;
+  }
+
+  getMediaClip(name) {
+    if (this.mediaClips.has(name)) return this.mediaClips.get(name);
+    const AudioClass = this.host?.Audio;
+    const BlobClass = this.host?.Blob;
+    const urlApi = this.host?.URL;
+    if (!AudioClass || !BlobClass || !urlApi?.createObjectURL) return null;
+    const url = urlApi.createObjectURL(new BlobClass([createWavBytes(name)], { type: "audio/wav" }));
+    const base = new AudioClass(url);
+    base.preload = "auto";
+    const clip = { base, url };
+    this.mediaClips.set(name, clip);
+    return clip;
+  }
+
+  async playMedia(name) {
+    try {
+      const clip = this.getMediaClip(name);
+      if (!clip) return false;
+      const audio = clip.base.cloneNode();
+      audio.volume = .92;
+      const cleanup = () => this.activeMedia.delete(audio);
+      audio.addEventListener?.("ended", cleanup, { once: true });
+      audio.addEventListener?.("error", cleanup, { once: true });
+      this.activeMedia.add(audio);
+      await audio.play();
+      this.lastPlaybackError = null;
+      return true;
+    } catch (error) {
+      this.lastPlaybackError = error?.name || "PlaybackError";
+      return false;
+    }
+  }
+
+  stopMedia() {
+    this.activeMedia.forEach((audio) => {
+      try { audio.pause(); } catch { /* Stopping media is best effort. */ }
     });
+    this.activeMedia.clear();
   }
 
   tone({ frequency, endFrequency = frequency, duration, gain = 0.08, type = "sine", delay = 0 }) {
@@ -243,18 +364,18 @@ export class SoundManager {
   }
 
   playSelection() {
-    return this.play(() => this.tone({ frequency: 230, endFrequency: 285, duration: 0.075, gain: 0.07 }));
+    return this.playWithClip("selection", () => this.tone({ frequency: 230, endFrequency: 285, duration: 0.075, gain: 0.07 }));
   }
 
   playEnabledCue() {
-    return this.play(() => {
+    return this.playWithClip("enabled", () => {
       this.tone({ frequency: 330, endFrequency: 440, duration: .13, gain: .09, type: "triangle" });
       this.tone({ frequency: 440, endFrequency: 550, duration: .16, gain: .075, type: "triangle", delay: .1 });
     });
   }
 
   playTurnStart(humanTurn) {
-    return this.play(() => {
+    return this.playWithClip(humanTurn ? "turn-human" : "turn-ai", () => {
       const first = humanTurn ? 294 : 220;
       const second = humanTurn ? 440 : 277;
       this.tone({ frequency: first, endFrequency: first, duration: .16, gain: .085, type: "triangle" });
@@ -263,7 +384,7 @@ export class SoundManager {
   }
 
   playBattle(attackerWon) {
-    return this.play(() => {
+    return this.playWithClip(attackerWon ? "battle-win" : "battle-loss", () => {
       [0, .065, .14, .225, .32, .43].forEach((delay, index) => {
         this.noiseClick(delay, 520 + index * 95 + this.random() * 120);
       });
@@ -282,14 +403,14 @@ export class SoundManager {
   }
 
   playEndTurn() {
-    return this.play(() => {
+    return this.playWithClip("end-turn", () => {
       this.tone({ frequency: 240, endFrequency: 165, duration: .22, gain: .055, type: "triangle" });
       this.tone({ frequency: 320, endFrequency: 220, duration: .18, gain: .035, delay: .06 });
     });
   }
 
   playGameEnd(humanWon) {
-    return this.play(() => {
+    return this.playWithClip(humanWon ? "game-win" : "game-loss", () => {
       const notes = humanWon ? [196, 247, 294] : [196, 147, 98];
       notes.forEach((frequency, index) => this.tone({
         frequency,
@@ -320,6 +441,9 @@ export class SoundManager {
   destroy() {
     this.stopAmbientNodes();
     this.clearEffectTimers();
+    this.stopMedia();
+    this.mediaClips.forEach(({ url }) => this.host?.URL?.revokeObjectURL?.(url));
+    this.mediaClips.clear();
     this.removeInteractionListeners();
     this.documentRef?.removeEventListener?.("visibilitychange", this.onVisibilityChange);
     try { this.context?.close(); } catch { /* Closing is best effort. */ }

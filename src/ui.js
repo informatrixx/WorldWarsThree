@@ -205,11 +205,23 @@ export class GameApp {
   bindSoundToggles() {
     this.root.querySelectorAll("[data-sound-toggle]").forEach((button) => {
       button.addEventListener("click", async () => {
-        const ready = await this.audio.toggle();
-        if (this.audio.enabled && ready) await this.audio.playEnabledCue();
+        await this.audio.toggle();
+        const played = this.audio.enabled ? await this.audio.playEnabledCue() : true;
+        if (!played && this.state) {
+          this.showToast(this.t("soundBlocked"));
+          return;
+        }
         if (this.state) this.renderGame();
         else this.renderSetup();
       });
+    });
+  }
+
+  playSound(playback) {
+    void playback.then((played) => {
+      if (!played && this.audio.enabled && this.state) this.showToast(this.t("soundBlocked"));
+    }).catch(() => {
+      if (this.audio.enabled && this.state) this.showToast(this.t("soundBlocked"));
     });
   }
 
@@ -726,7 +738,7 @@ export class GameApp {
       const willSelect = this.selectedSource !== regionId;
       this.selectedSource = this.selectedSource === regionId ? null : regionId;
       this.selectedTarget = null;
-      if (willSelect) void this.audio.playSelection();
+      if (willSelect) this.playSound(this.audio.playSelection());
     } else if (this.selectedSource !== null && getLegalTargets(this.state, this.selectedSource).includes(regionId)) {
       this.selectedTarget = regionId;
       this.performAttack();
@@ -749,7 +761,7 @@ export class GameApp {
     if (!getActivePlayer(this.state).isHuman || this.state.phase !== "playing" || this.combatAnimation) return;
     this.selectedSource = null;
     this.selectedTarget = null;
-    void this.audio.playEndTurn();
+    this.playSound(this.audio.playEndTurn());
     this.state = endTurn(this.state);
     this.save();
     this.announceCurrentTurn();
@@ -783,7 +795,7 @@ export class GameApp {
 
   showCombatAnimation(battle, onComplete) {
     if (this.combatAnimationTimer) window.clearTimeout(this.combatAnimationTimer);
-    void this.audio.playBattle(battle.attackerWon);
+    this.playSound(this.audio.playBattle(battle.attackerWon));
     this.combatAnimation = { battle };
     this.renderGame();
     this.combatAnimationTimer = window.setTimeout(() => {
@@ -792,7 +804,7 @@ export class GameApp {
       this.renderGame();
       if (this.state.phase === "finished" && this.announcedWinnerId !== this.state.winnerId) {
         this.announcedWinnerId = this.state.winnerId;
-        void this.audio.playGameEnd(this.state.winnerId === 0);
+        this.playSound(this.audio.playGameEnd(this.state.winnerId === 0));
       }
       onComplete?.();
     }, COMBAT_ANIMATION_MS);
@@ -807,7 +819,7 @@ export class GameApp {
     if (this.turnNotificationTimer) window.clearTimeout(this.turnNotificationTimer);
     const active = getActivePlayer(this.state);
     this.turnNotification = { playerId: active.id, round: this.state.turn.round };
-    void this.audio.playTurnStart(active.isHuman);
+    this.playSound(this.audio.playTurnStart(active.isHuman));
     this.renderGame();
     this.turnNotificationTimer = window.setTimeout(() => {
       this.turnNotification = null;

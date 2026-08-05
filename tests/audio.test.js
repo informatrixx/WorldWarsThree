@@ -105,3 +105,45 @@ test("missing Web Audio support degrades to silence", async () => {
   assert.equal(await manager.playSelection(), false);
   assert.equal(manager.context, null);
 });
+
+test("audible effects prefer generated WAV media and clean up their URLs", async () => {
+  const environment = fixture();
+  const blobs = [];
+  const revoked = [];
+  let plays = 0;
+  class FakeBlob {
+    constructor(parts, options) {
+      this.parts = parts;
+      this.type = options.type;
+      blobs.push(this);
+    }
+  }
+  class FakeAudio {
+    constructor(src) { this.src = src; }
+    cloneNode() { return new FakeAudio(this.src); }
+    addEventListener() {}
+    async play() { plays += 1; }
+    pause() {}
+  }
+  environment.host.Audio = FakeAudio;
+  environment.host.Blob = FakeBlob;
+  environment.host.URL = {
+    createObjectURL: (_blob) => `blob:test-${blobs.length}`,
+    revokeObjectURL: (url) => revoked.push(url),
+  };
+  const manager = new SoundManager({
+    host: environment.host,
+    storage: environment.storage,
+    documentRef: null,
+  });
+
+  assert.equal(await manager.playSelection(), true);
+  assert.equal(await manager.playTurnStart(true), true);
+  assert.equal(plays, 2);
+  assert.equal(blobs.length, 2);
+  assert.equal(blobs.every((blob) => blob.type === "audio/wav"), true);
+  assert.equal(new TextDecoder().decode(blobs[0].parts[0].slice(0, 4)), "RIFF");
+
+  manager.destroy();
+  assert.equal(revoked.length, 2);
+});
