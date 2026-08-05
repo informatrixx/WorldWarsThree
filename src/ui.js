@@ -37,6 +37,16 @@ function unitCounts(units) {
   }, { infantry: 0, armor: 0, artillery: 0 });
 }
 
+function unitAsset(type) {
+  return `assets/units/${type}.png`;
+}
+
+function dominantUnit(units) {
+  const counts = unitCounts(units);
+  return ["armor", "artillery", "infantry"]
+    .sort((first, second) => counts[second] - counts[first])[0];
+}
+
 function terrainSymbol(terrain) {
   return { plains: "◇", forest: "♠", hills: "▲", city: "▦" }[terrain] ?? "◇";
 }
@@ -59,7 +69,8 @@ function regionBoundary(region, ownerByCell) {
 function formatDice(dice) {
   return dice.map((die) => `
     <span class="die die-${die.type}" title="${escapeHtml(die.type)}">
-      ${die.base}${die.modifier ? `<sup>+${die.modifier}</sup>` : ""}
+      <img src="${unitAsset(die.type)}" alt="">
+      <b>${die.base}${die.modifier ? `<sup>+${die.modifier}</sup>` : ""}</b>
     </span>
   `).join("");
 }
@@ -319,6 +330,7 @@ export class GameApp {
     const regions = this.state.map.regions.map((region) => {
       const player = this.state.players[region.ownerId];
       const counts = unitCounts(region.units);
+      const leadingUnit = dominantUnit(region.units);
       const points = region.cells.map((cell) => {
         const polygon = getHexPoints(cell.q, cell.r).map((point) => `${number(point.x)},${number(point.y)}`).join(" ");
         return `<polygon points="${polygon}" class="region-cell"/><polygon points="${polygon}" class="region-pattern"/>`;
@@ -340,10 +352,11 @@ export class GameApp {
           ${points}
           <path class="region-boundary" d="${regionBoundary(region, ownerByCell)}"/>
           <g class="region-marker" transform="translate(${number(region.center.x)} ${number(region.center.y)})">
-            <circle r="22"/>
-            <text class="unit-total" y="5">${region.units.length}</text>
+            <image class="map-unit-sprite" href="${unitAsset(leadingUnit)}" x="-26" y="-40" width="52" height="52" preserveAspectRatio="xMidYMid meet"/>
+            <circle class="unit-count-badge" cx="14" cy="4" r="15"/>
+            <text class="unit-total" x="14" y="9">${region.units.length}</text>
             <text class="terrain-symbol" x="-29" y="-15">${terrainSymbol(region.terrain)}</text>
-            ${region.isHeadquarters ? '<path class="hq-marker" d="M0-31 8-23 0-15-8-23Z"/><text class="hq-label" y="-20">HQ</text>' : ""}
+            ${region.isHeadquarters ? '<path class="hq-marker" d="M23-41 31-33 23-25 15-33Z"/><text class="hq-label" x="23" y="-30">HQ</text>' : ""}
             <text class="unit-mix" y="34">●${counts.infantry} ◆${counts.armor} ▲${counts.artillery}</text>
           </g>
         </g>
@@ -376,9 +389,9 @@ export class GameApp {
           <div><strong>${escapeHtml(this.t("region", { id: region.id + 1 }))}</strong>${region.isHeadquarters ? `<b class="tag">${this.t("headquartersShort")}</b>` : ""}</div>
           <small>${escapeHtml(playerName(this.state, player.id, this.locale))} · ${escapeHtml(this.t(region.terrain))}</small>
           <div class="unit-breakdown">
-            <span title="${escapeHtml(this.t("infantry"))}">● ${counts.infantry}</span>
-            <span title="${escapeHtml(this.t("armor"))}">◆ ${counts.armor}</span>
-            <span title="${escapeHtml(this.t("artillery"))}">▲ ${counts.artillery}</span>
+            <span title="${escapeHtml(this.t("infantry"))}"><img src="${unitAsset("infantry")}" alt="">${counts.infantry}</span>
+            <span title="${escapeHtml(this.t("armor"))}"><img src="${unitAsset("armor")}" alt="">${counts.armor}</span>
+            <span title="${escapeHtml(this.t("artillery"))}"><img src="${unitAsset("artillery")}" alt="">${counts.artillery}</span>
           </div>
         </div>
       `;
@@ -509,7 +522,13 @@ export class GameApp {
           </section>
           <aside class="game-sidebar">
             ${this.selectedRegionPanel()}
-            <section class="side-panel help-panel"><div class="panel-kicker">${escapeHtml(this.t("helpTitle"))}</div><p>${escapeHtml(this.t("helpText"))}</p></section>
+            <section class="side-panel help-panel">
+              <div class="panel-kicker">${escapeHtml(this.t("helpTitle"))}</div>
+              <p>${escapeHtml(this.t("helpText"))}</p>
+              <div class="unit-legend">
+                ${["infantry", "armor", "artillery"].map((type) => `<span><img src="${unitAsset(type)}" alt="">${escapeHtml(this.t(type))}</span>`).join("")}
+              </div>
+            </section>
             ${this.renderLog()}
             <button class="button button-primary end-turn" id="end-turn" ${humanTurn ? "" : "disabled"}>${escapeHtml(this.t("endTurn"))}<span>→</span></button>
           </aside>

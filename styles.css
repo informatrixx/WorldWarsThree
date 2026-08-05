@@ -674,10 +674,14 @@ input:hover {
   pointer-events: none;
 }
 
-.region-marker circle {
+.region-marker .unit-count-badge {
   fill: rgba(5, 12, 18, 0.87);
   stroke: var(--region-accent);
   stroke-width: 2px;
+}
+
+.map-unit-sprite {
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .75));
 }
 
 .unit-total {
@@ -817,11 +821,53 @@ input:hover {
 
 .unit-breakdown {
   display: flex;
-  gap: 10px;
+  gap: 7px;
   margin-top: 8px;
   color: #cfe0e4;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.unit-breakdown span {
+  display: inline-flex;
+  min-width: 42px;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 5px 2px 1px;
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.unit-breakdown img {
+  width: 25px;
+  height: 25px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .5));
+}
+
+.unit-legend {
+  display: grid;
+  margin-top: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.unit-legend span {
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  gap: 2px;
+  color: #9fb5be;
+  font-size: 7px;
+  text-align: center;
+}
+
+.unit-legend img {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .55));
 }
 
 .text-button {
@@ -969,24 +1015,49 @@ input:hover {
 }
 
 .die {
+  position: relative;
   display: inline-flex;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 34px;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   border: 1px solid rgba(255,255,255,.2);
   border-radius: 5px;
   background: #dbe8e7;
   color: #071019;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  font-weight: 900;
   box-shadow: inset 0 -4px 8px rgba(0,0,0,.16);
 }
 
 .die-armor { background: #edc16e; }
 .die-artillery { background: #a9b8ef; }
-.die sup { color: #168178; font-size: 7px; }
+.die img {
+  position: absolute;
+  width: 31px;
+  height: 31px;
+  inset: 1px auto auto 0;
+  object-fit: contain;
+  opacity: .48;
+}
+
+.die b {
+  z-index: 1;
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(242, 249, 248, .88);
+  color: #071019;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 950;
+  box-shadow: 0 1px 4px rgba(0,0,0,.35);
+}
+
+.die sup { color: #168178; font-size: 6px; }
 
 .versus {
   align-self: center;

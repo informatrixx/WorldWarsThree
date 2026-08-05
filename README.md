@@ -54,6 +54,8 @@ npm test
 
 Die Tests verwenden ausschließlich den in Node.js integrierten Test-Runner.
 
+Die eigenständigen Einheiten-Sprites unter `assets/units/` sind für die Karte optimierte transparente PNG-Dateien und Bestandteil dieses Projekts.
+
 ## Lizenz / License
 
 [MIT](LICENSE)
