@@ -751,7 +751,7 @@ input:hover {
   padding: 28px;
   pointer-events: none;
   background: radial-gradient(circle at center, rgba(4, 12, 20, .28), transparent 58%);
-  animation: combat-overlay-life 760ms both;
+  animation: combat-overlay-life 1100ms both;
 }
 
 .combat-roll {
@@ -817,7 +817,7 @@ input:hover {
   color: #071019;
   box-shadow: 0 5px 10px rgba(0, 0, 0, .38), inset 0 -3px 5px rgba(0, 0, 0, .14);
   transform-style: preserve-3d;
-  animation: combat-die-roll 390ms cubic-bezier(.2, .75, .3, 1.1) calc(var(--die-index) * 13ms) both;
+  animation: combat-die-roll 520ms cubic-bezier(.2, .75, .3, 1.1) calc(var(--die-index) * 13ms) both;
 }
 
 .combat-die b {
@@ -848,7 +848,7 @@ input:hover {
   line-height: 1;
   opacity: 0;
   text-shadow: 0 0 18px color-mix(in srgb, var(--combat-color) 70%, transparent);
-  animation: combat-result-in 110ms ease-out 400ms forwards;
+  animation: combat-result-in 140ms ease-out 540ms forwards;
 }
 
 .combat-outcome {
@@ -857,7 +857,7 @@ input:hover {
   gap: 9px;
   opacity: 0;
   text-align: center;
-  animation: combat-result-in 110ms ease-out 400ms forwards;
+  animation: combat-result-in 140ms ease-out 540ms forwards;
 }
 
 .combat-outcome i {

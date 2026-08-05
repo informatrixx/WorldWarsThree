@@ -14,7 +14,7 @@ import { playerName, translate } from "./i18n.js";
 
 const SAVE_KEY = "dicefront-dominion:save:v1";
 const LOCALE_KEY = "dicefront-dominion:locale";
-const COMBAT_ANIMATION_MS = 760;
+const COMBAT_ANIMATION_MS = 1100;
 const HEX_DIRECTIONS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 const EDGE_CORNERS = [[0, 1], [5, 0], [4, 5], [3, 4], [2, 3], [1, 2]];
 const DIE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
