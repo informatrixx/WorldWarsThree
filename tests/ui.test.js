@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calculateReinforcements, createGame, getActivePlayer, getLegalTargets, TERRAIN_TYPES } from "../src/core/game.js";
+import { calculateReinforcements, createGame, getActivePlayer, getBattleModifierSummary, getLegalTargets, getRecommendedStance, TERRAIN_TYPES } from "../src/core/game.js";
+import { HEX_SIZE } from "../src/core/map-generator.js";
 import { GameApp } from "../src/ui.js";
 
 test("setup preferences persist and preselect the next match form", (context) => {
@@ -92,6 +93,46 @@ test("continuing a saved human turn clears transient locks and restores legal at
   )));
 });
 
+test("the active online player can select an owned source territory", (context) => {
+  globalThis.window = { addEventListener() {} };
+  context.after(() => delete globalThis.window);
+  const app = new GameApp({});
+  app.state = createGame({
+    playerCount: 2,
+    mapSize: "small",
+    difficulty: "normal",
+    victoryMode: "headquarters",
+    locale: "de",
+    seed: "online-source-selection",
+  });
+  app.onlineClient = { playerId: 0 };
+  app.onlineRoom = { status: "playing", hostId: 0 };
+  app.renderGame = () => {};
+  app.audio.playSelection = () => null;
+  app.playSound = () => {};
+  const source = app.state.map.regions.find((region) => region.ownerId === 0 && region.units.length >= 2);
+
+  app.selectRegion(source.id);
+
+  assert.equal(app.selectedSource, source.id);
+});
+
+test("online combat updates queue every automated battle animation", (context) => {
+  globalThis.window = { addEventListener() {} };
+  context.after(() => delete globalThis.window);
+  const app = new GameApp({});
+  const shown = [];
+  app.showCombatAnimation = (battle, onComplete) => {
+    shown.push(battle.id);
+    onComplete?.();
+  };
+
+  app.showCombatAnimationSequence([{ id: "ai-1" }, { id: "ai-2" }, { id: "ai-3" }]);
+
+  assert.deepEqual(shown, ["ai-1", "ai-2", "ai-3"]);
+  assert.deepEqual(app.combatAnimationQueue, []);
+});
+
 test("continuing during an AI turn immediately restarts AI processing", (context) => {
   let scheduled = 0;
   globalThis.window = {
@@ -125,6 +166,27 @@ test("continuing during an AI turn immediately restarts AI processing", (context
   assert.equal(app.aiRunning, true);
   assert.equal(app.aiTimer, 1);
   assert.equal(scheduled, 1);
+});
+
+test("the operation log is available as a collapsed optional sidebar detail", (context) => {
+  globalThis.window = { addEventListener() {} };
+  context.after(() => delete globalThis.window);
+  const app = new GameApp({});
+  app.state = createGame({
+    playerCount: 2,
+    mapSize: "small",
+    difficulty: "normal",
+    victoryMode: "headquarters",
+    locale: "de",
+    seed: "collapsed-operation-log",
+  });
+  app.state.log.unshift({ type: "turnStarted", playerId: 0, round: 1 });
+
+  const log = app.renderLog();
+  assert.match(log, /<details class="side-panel log-panel">/);
+  assert.match(log, /<summary><span class="panel-kicker">Einsatzprotokoll<\/span>/);
+  assert.doesNotMatch(log, /<details[^>]*\bopen\b/);
+  assert.match(log, /class="log-turnStarted latest"/);
 });
 
 test("an untouched opening map can be rejected and immediately reseeded", (context) => {
@@ -204,15 +266,50 @@ test("the map integrates each unit type and territory information into owned hex
   assert.equal([...svg.matchAll(/class="territory-formation"/g)].length, app.state.map.regions.length);
   assert.doesNotMatch(svg, /territory-token|territory-token-bg/);
   assert.match(svg, /class="map-regions"[\s\S]*class="map-markers"/);
+  const riverCuts = [...svg.matchAll(/class="river-cut" d="([^"]+)"/g)];
+  assert.equal(riverCuts.length, app.state.map.riverRoutes.length || app.state.map.riverPaths.length);
+  riverCuts.forEach(([, geometry]) => {
+    assert.doesNotMatch(geometry, /[QTC]/, "rivers must not cut diagonally through territories");
+    const commands = [...geometry.matchAll(/([ML])(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)]
+      .map((match) => ({ command: match[1], x: Number(match[2]), y: Number(match[3]) }));
+    let previous = null;
+    for (const point of commands) {
+      if (point.command === "L" && previous) {
+        assert.ok(Math.hypot(point.x - previous.x, point.y - previous.y) <= HEX_SIZE + 0.02);
+      }
+      previous = point;
+    }
+  });
+  assert.doesNotMatch(svg, /river-mouth-/);
+  assert.doesNotMatch(svg, /region-pattern|terrain-pattern-|player-pattern-/);
   assert.equal([...svg.matchAll(/class="region-marker-owner /g)].length, app.state.map.regions.length);
-  assert.equal([...svg.matchAll(/class="token-terrain"/g)].length, app.state.map.regions.length);
+  assert.equal([...svg.matchAll(/class="[^"]*terrain-primary-image/g)].length, app.state.map.regions.length);
+  const expectedDecorations = app.state.map.regions.reduce((sum, region) => (
+    sum + region.cells.length - new Set(region.units).size - 1
+  ), 0);
+  assert.equal([...svg.matchAll(/class="terrain-decoration terrain-decoration-/g)].length, expectedDecorations);
+  for (const terrain of TERRAIN_TYPES) {
+    const expected = app.state.map.regions.filter((region) => region.terrain === terrain).length;
+    assert.equal(
+      [...svg.matchAll(new RegExp(`class="terrain-decoration-image terrain-primary-image"[^>]*href="assets/terrain/${terrain}\\.png"`, "g"))].length,
+      expected,
+    );
+    const expectedDetails = app.state.map.regions
+      .filter((region) => region.terrain === terrain)
+      .reduce((sum, region) => sum + region.cells.length - new Set(region.units).size - 1, 0);
+    const terrainDecorationPattern = new RegExp(
+      `class="terrain-decoration-image" href="assets/terrain/${terrain}(?:-detail(?:-extra|-alt[23]|-alt)?)?\\.png"`,
+      "g",
+    );
+    assert.equal([...svg.matchAll(terrainDecorationPattern)].length, expectedDetails);
+  }
   const expectedTypeMarkers = app.state.map.regions.reduce((sum, region) => (
     sum + new Set(region.units).size
   ), 0);
   assert.equal([...svg.matchAll(/class="force-type force-/g)].length, expectedTypeMarkers);
   assert.match(svg, /class="map-detail-overview"/);
   assert.doesNotMatch(svg, /map-unit-sprite|unit-glyph-/);
-  for (const type of ["infantry", "armor", "artillery"]) {
+  for (const type of ["infantry", "armor", "artillery", "pioneers", "supply", "snipers"]) {
     const expected = app.state.map.regions.filter((region) => region.units.includes(type)).length;
     assert.equal(
       [...svg.matchAll(new RegExp(`class="force-image" href="assets/units/${type}\\.png"`, "g"))].length,
@@ -229,8 +326,9 @@ test("the map integrates each unit type and territory information into owned hex
   assert.match(firstRegion, /class="unit-total-bg"/);
   const occupiedCells = [...firstRegion.matchAll(/data-cell-q="(-?\d+)" data-cell-r="(-?\d+)"/g)]
     .map((match) => `${match[1]},${match[2]}`);
-  assert.equal(new Set(occupiedCells).size, 4);
   const regionCells = new Set(app.state.map.regions[0].cells.map((cell) => `${cell.q},${cell.r}`));
+  assert.equal(occupiedCells.length, regionCells.size);
+  assert.equal(new Set(occupiedCells).size, regionCells.size);
   assert.ok(occupiedCells.every((key) => regionCells.has(key)));
 
   app.camera.width = app.state.map.bounds.width * 0.7;
@@ -315,17 +413,52 @@ test("legal neighboring targets show relative modifiers while a prior battle ani
   source.units = ["infantry", "infantry"];
   negativeTarget.units = ["infantry", "infantry", "infantry"];
   negativeTarget.terrain = "forest";
+  negativeTarget.isCoastal = false;
+  app.state.map.rivers = [];
   app.selectedSource = source.id;
   app.combatAnimation = { battle: { sourceId: source.id, targetId: negativeTarget.id } };
 
   const map = app.renderMap();
+  const recommended = getRecommendedStance(app.state, source.id, negativeTarget.id);
+  const summary = getBattleModifierSummary(app.state, source.id, negativeTarget.id, recommended);
+  const signed = summary.netBonus < 0 ? `−${Math.abs(summary.netBonus)}` : `+${summary.netBonus}`;
+  const signedPattern = signed.replace("+", "\\+");
   assert.equal([...map.matchAll(/class="combat-modifier modifier-/g)].length, targets.length);
-  assert.match(map, /combat-modifier modifier-negative/);
-  assert.match(map, />−3<\/text>/);
-  assert.match(map, /relativer Kampfbonus −3/);
+  assert.match(map, new RegExp(`>${signedPattern}<\\/text>`));
+  assert.match(map, new RegExp(`relativer Kampfbonus ${signedPattern}`));
   assert.match(map, /selected-source/);
   assert.match(map, /legal-target/);
   assert.doesNotMatch(map, /combat-source|combat-target/);
+});
+
+test("automatic stance is selected by default while manual stance remains an immediate override", (context) => {
+  globalThis.window = { addEventListener() {} };
+  context.after(() => delete globalThis.window);
+  const app = new GameApp({});
+  app.state = createGame({
+    playerCount: 2,
+    mapSize: "small",
+    difficulty: "normal",
+    victoryMode: "headquarters",
+    locale: "de",
+    seed: "automatic-stance-ui-test",
+  });
+  const source = app.state.map.regions.find((region) => (
+    region.ownerId === 0 && region.units.length >= 2 && getLegalTargets(app.state, region.id).length
+  ));
+  const targetId = getLegalTargets(app.state, source.id)[0];
+  source.units = ["armor", "armor", "infantry"];
+  app.state.map.regions[targetId].terrain = "plains";
+  app.state.map.regions[targetId].isCoastal = false;
+  app.state.map.rivers = [];
+  app.selectedSource = source.id;
+
+  assert.equal(app.selectedStance, null);
+  assert.equal(app.attackStanceForTarget(targetId), "breakthrough");
+  assert.match(app.selectedRegionPanel(), /data-stance="auto"/);
+  assert.match(app.selectedRegionPanel(), /Klasse \+2 · andere −1 · Bilanz \+1/);
+  app.selectedStance = "security";
+  assert.equal(app.attackStanceForTarget(targetId), "security");
 });
 
 test("capture color is immediate for the human and delayed during AI combat animation", (context) => {
@@ -374,7 +507,7 @@ test("capture color is immediate for the human and delayed during AI combat anim
     duringAnimation.indexOf("</g>\n          </g>", duringAnimation.indexOf(`data-marker-region-id="${target.id}"`)),
   );
   assert.match(animatedTarget, new RegExp(`--region-color:${defender.style.color}`));
-  assert.match(animatedTarget, new RegExp(`player-pattern-${defender.id}`));
+  assert.match(animatedTarget, new RegExp(`data-visual-owner="${defender.id}"`));
   assert.match(animatedMarker, /class="unit-total"[^>]*>3<\/text>/);
   assert.match(animatedMarker, /force-infantry[\s\S]*class="force-count"[^>]*>2<\/text>/);
   assert.match(animatedMarker, /force-artillery[\s\S]*class="force-count"[^>]*>1<\/text>/);
@@ -399,7 +532,7 @@ test("capture color is immediate for the human and delayed during AI combat anim
     afterAnimation.indexOf("</g>\n          </g>", afterAnimation.indexOf(`data-marker-region-id="${target.id}"`)),
   );
   assert.match(revealedTarget, new RegExp(`--region-color:${attacker.style.color}`));
-  assert.match(revealedTarget, new RegExp(`player-pattern-${attacker.id}`));
+  assert.match(revealedTarget, new RegExp(`data-visual-owner="${attacker.id}"`));
   assert.match(revealedMarker, /class="unit-total"[^>]*>1<\/text>/);
   assert.match(revealedMarker, /force-armor[\s\S]*class="force-count"[^>]*>1<\/text>/);
   const revealedSourceMarker = afterAnimation.slice(
@@ -426,7 +559,7 @@ test("capture color is immediate for the human and delayed during AI combat anim
     humanCapture.indexOf("</g>", humanCapture.indexOf(`data-region-id="${target.id}"`)),
   );
   assert.match(humanTarget, new RegExp(`--region-color:${defender.style.color}`));
-  assert.match(humanTarget, new RegExp(`player-pattern-${defender.id}`));
+  assert.match(humanTarget, new RegExp(`data-visual-owner="${defender.id}"`));
 });
 
 test("the tactical card panel keeps AI cards secret and highlights legal card targets", (context) => {

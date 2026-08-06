@@ -1,0 +1,18 @@
+[Unit]
+Description=Dicefront Dominion multiplayer WebSocket server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/codex/WorldWarsThree
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=PORT=8787
+Environment=WS_PATH=/codex/WorldWarsThree/ws
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

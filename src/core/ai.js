@@ -3,6 +3,7 @@ import {
   discardCard,
   endTurn,
   getActivePlayer,
+  getRecommendedStance,
   getLegalAttacks,
   getLegalCardTargets,
   playCard,
@@ -15,7 +16,8 @@ function tacticalScore(state, attack, difficulty) {
   const source = state.map.regions[attack.sourceId];
   const target = state.map.regions[attack.targetId];
   const playerId = source.ownerId;
-  const odds = computeBattleOdds(state, source.id, target.id);
+  const stance = getRecommendedStance(state, source.id, target.id);
+  const odds = computeBattleOdds(state, source.id, target.id, stance);
   const friendlyLinks = target.neighbors.filter(
     (neighborId) => state.map.regions[neighborId].ownerId === playerId,
   ).length;
@@ -32,7 +34,7 @@ function tacticalScore(state, attack, difficulty) {
     score += targetExitCount * 3 - hostilePressure * 0.7;
     if (source.isHeadquarters) score -= 18;
   }
-  return { ...attack, odds, score };
+  return { ...attack, odds, stance, score };
 }
 
 function decisionHash(state, attackCount) {
@@ -52,7 +54,10 @@ export function chooseAiAttack(state, attackCount = 0) {
   const attacks = getLegalAttacks(state).map((attack) => tacticalScore(state, attack, difficulty));
   const threshold = difficulty === "easy" ? 0.3 : difficulty === "normal" ? 0.48 : 0.4;
   const plausible = attacks.filter((attack) => attack.odds >= threshold);
-  if (!plausible.length) return null;
+  if (!plausible.length) {
+    attacks.sort((first, second) => second.score - first.score || first.sourceId - second.sourceId || first.targetId - second.targetId);
+    return attacks[0] ?? null;
+  }
 
   const hash = decisionHash(state, attackCount);
   if (difficulty === "easy") {
@@ -102,6 +107,17 @@ function chooseCardPlay(state, card) {
     })[0];
     return { cardId: card.id, selection: { targetId }, score: 62 };
   }
+  if (card.type === "supplyConvoy") {
+    const targetId = [...targets].sort((first, second) => regions[first].units.length - regions[second].units.length || first - second)[0];
+    return targetId === undefined ? null : { cardId: card.id, selection: { targetId }, score: 70 };
+  }
+  if (card.type === "interdiction") {
+    const targetId = [...targets].sort((first, second) => {
+      const pressure = (id) => regions[id].neighbors.filter((neighborId) => regions[neighborId].ownerId === regions[id].ownerId).length;
+      return pressure(second) - pressure(first) || first - second;
+    })[0];
+    return targetId === undefined ? null : { cardId: card.id, selection: { targetId }, score: 78 };
+  }
   if (card.type === "fortification") {
     const ranked = [...targets].map((targetId) => {
       const region = regions[targetId];
@@ -147,7 +163,7 @@ export function playAiCards(initialState) {
   if (player.isHuman || state.phase !== "playing" || !state.config.cardsEnabled) return { state, played: 0, discarded: 0 };
   let discarded = 0;
   while (requiresCardDiscard(state)) {
-    const values = { supplyDrop: 45, redeploy: 40, fireSupport: 60, fortification: 48, luckyRoll: 75, mobilization: 90 };
+    const values = { supplyDrop: 45, redeploy: 40, fireSupport: 60, fortification: 48, luckyRoll: 75, mobilization: 90, supplyConvoy: 70, interdiction: 80 };
     const card = [...getActivePlayer(state).hand]
       .sort((first, second) => values[first.type] - values[second.type] || first.id.localeCompare(second.id))[0];
     state = discardCard(state, card.id);
@@ -169,12 +185,17 @@ export function playAiCards(initialState) {
 export function playAiTurn(initialState) {
   let state = playAiCards(initialState).state;
   let attacks = 0;
+  const battles = [];
+  const battleStates = [];
   while (state.phase === "playing") {
     const attack = chooseAiAttack(state, attacks);
     if (!attack) break;
-    state = resolveAttack(state, attack.sourceId, attack.targetId).state;
+    battleStates.push(state);
+    const result = resolveAttack(state, attack.sourceId, attack.targetId, { stance: attack.stance });
+    state = result.state;
+    battles.push(result.battle);
     attacks += 1;
   }
   if (state.phase === "playing") state = endTurn(state);
-  return { state, attacks };
+  return { state, attacks, battles, battleStates };
 }
