@@ -5,8 +5,13 @@
   "type": "module",
   "description": "A dependency-free, turn-based browser strategy game.",
   "scripts": {
-    "check": "node --check src/main.js && node --check src/ui.js && node --check src/audio.js && node --check src/core/game.js && node --check src/core/map-generator.js && node --check src/core/ai.js",
-    "test": "node --test"
+    "check": "node --check src/main.js && node --check src/ui.js && node --check src/online.js && node --check src/audio.js && node --check src/core/game.js && node --check src/core/map-generator.js && node --check src/core/ai.js && node --check server/index.js && node --check server/room-manager.js",
+    "test": "node --test",
+    "server": "node server/index.js",
+    "test:server": "node --test tests/server.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   },
   "engines": {
     "node": ">=20"

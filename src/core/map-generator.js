@@ -6,6 +6,13 @@ export const MAP_SIZES = Object.freeze({
   large: 90,
 });
 
+export const RIVER_DENSITIES = Object.freeze({
+  none: 0,
+  few: 0.04,
+  normal: 0.08,
+  many: 0.14,
+});
+
 export const HEX_SIZE = 25;
 export const MIN_REGION_CELLS = 4;
 
@@ -303,6 +310,7 @@ function buildRegions(cells, assignment, count) {
     cells: [],
     neighbors: [],
     terrain: "plains",
+    isCoastal: false,
     ownerId: null,
     units: [],
     isHeadquarters: false,
@@ -333,6 +341,170 @@ function buildRegions(cells, assignment, count) {
   return regions;
 }
 
+function annotateCoasts(regions, land) {
+  regions.forEach((region) => {
+    region.isCoastal = region.cells.some((cell) => adjacentCells(cell)
+      .some((neighbor) => !land.has(cellKey(neighbor.q, neighbor.r))));
+  });
+}
+
+function riverPointKey(point) {
+  return `${point.x.toFixed(3)},${point.y.toFixed(3)}`;
+}
+
+function riverEdgeKey(from, to) {
+  return [riverPointKey(from), riverPointKey(to)].sort().join("|");
+}
+
+function buildBoundaryEdgeGraph(regions) {
+  const ownerByCell = new Map();
+  regions.forEach((region) => region.cells.forEach((cell) => {
+    ownerByCell.set(cellKey(cell.q, cell.r), region.id);
+  }));
+  const edgeByGeometry = new Map();
+  for (const region of regions) {
+    for (const cell of region.cells) {
+      const corners = getHexPoints(cell.q, cell.r);
+      DIRECTIONS.forEach(([dq, dr], directionIndex) => {
+        const neighborId = ownerByCell.get(cellKey(cell.q + dq, cell.r + dr));
+        if (neighborId === region.id) return;
+        const edgeCorners = [[0, 1], [5, 0], [4, 5], [3, 4], [2, 3], [1, 2]][directionIndex];
+        const from = corners[edgeCorners[0]];
+        const to = corners[edgeCorners[1]];
+        const key = riverEdgeKey(from, to);
+        if (edgeByGeometry.has(key)) return;
+        const regionPair = neighborId === undefined
+          ? [region.id, null]
+          : [Math.min(region.id, neighborId), Math.max(region.id, neighborId)];
+        edgeByGeometry.set(key, {
+          from: { x: Number(from.x.toFixed(2)), y: Number(from.y.toFixed(2)) },
+          to: { x: Number(to.x.toFixed(2)), y: Number(to.y.toFixed(2)) },
+          pointKeys: [riverPointKey(from), riverPointKey(to)],
+          regions: regionPair,
+          coastal: neighborId === undefined,
+        });
+      });
+    }
+  }
+  const edges = [...edgeByGeometry.values()];
+  const edgesByPoint = new Map();
+  edges.forEach((edge, index) => edge.pointKeys.forEach((key) => {
+    if (!edgesByPoint.has(key)) edgesByPoint.set(key, []);
+    edgesByPoint.get(key).push(index);
+  }));
+  const adjacency = edges.map((edge, index) => [...new Set(edge.pointKeys.flatMap((key) => edgesByPoint.get(key)))]
+    .filter((neighbor) => neighbor !== index));
+  return { edges, adjacency };
+}
+
+function distancesFromCoast(edges, adjacency, coastPoints) {
+  const distances = edges.map(() => Infinity);
+  const queue = [];
+  edges.forEach((edge, index) => {
+    if (edge.coastal || !edge.pointKeys.some((key) => coastPoints.has(key))) return;
+    distances[index] = 0;
+    queue.push(index);
+  });
+  while (queue.length) {
+    const current = queue.shift();
+    for (const neighbor of adjacency[current]) {
+      if (edges[neighbor].coastal) continue;
+      if (distances[neighbor] <= distances[current] + 1) continue;
+      distances[neighbor] = distances[current] + 1;
+      queue.push(neighbor);
+    }
+  }
+  return distances;
+}
+
+function findRiverEdgeRoute(start, edges, adjacency, coastPoints, used, rng) {
+  const previous = new Map([[start, null]]);
+  const queue = [start];
+  let coast = null;
+  while (queue.length) {
+    const current = queue.shift();
+    const previousEdge = previous.get(current);
+    const entryPoints = previousEdge === null
+      ? []
+      : edges[current].pointKeys.filter((key) => edges[previousEdge].pointKeys.includes(key));
+    const exitsAtSea = edges[current].pointKeys.some((key) => coastPoints.has(key) && !entryPoints.includes(key));
+    if (current !== start && exitsAtSea) {
+      coast = current;
+      break;
+    }
+    for (const neighbor of rng.shuffle(adjacency[current])) {
+      if (edges[neighbor].coastal || used.has(neighbor) || previous.has(neighbor)) continue;
+      previous.set(neighbor, current);
+      queue.push(neighbor);
+    }
+  }
+  if (coast === null) return [];
+  const route = [];
+  for (let current = coast; current !== null; current = previous.get(current)) route.unshift(current);
+  return route;
+}
+
+function orientRiverRoute(route, edges, coastPoints) {
+  if (!route.length) return [];
+  const oriented = [];
+  let currentPoint = null;
+  route.forEach((edgeIndex, index) => {
+    const edge = edges[edgeIndex];
+    if (index === 0) {
+      const next = edges[route[index + 1]];
+      const shared = next && edge.pointKeys.find((key) => next.pointKeys.includes(key));
+      const fromIndex = shared === edge.pointKeys[0] ? 1 : 0;
+      const toIndex = fromIndex === 0 ? 1 : 0;
+      oriented.push({ from: edge[fromIndex === 0 ? "from" : "to"], to: edge[toIndex === 0 ? "from" : "to"], regions: edge.regions });
+      currentPoint = edge.pointKeys[toIndex];
+      return;
+    }
+    const fromIndex = edge.pointKeys[0] === currentPoint ? 0 : 1;
+    const toIndex = fromIndex === 0 ? 1 : 0;
+    oriented.push({
+      from: edge[fromIndex === 0 ? "from" : "to"],
+      to: edge[toIndex === 0 ? "from" : "to"],
+      regions: edge.regions,
+      ...(index === route.length - 1 && coastPoints.has(edge.pointKeys[toIndex]) ? { mouth: true } : {}),
+    });
+    currentPoint = edge.pointKeys[toIndex];
+  });
+  return oriented;
+}
+
+function selectRivers(regions, density, rng) {
+  const ratio = RIVER_DENSITIES[density] ?? RIVER_DENSITIES.normal;
+  if (!ratio) return { rivers: [], riverPaths: [], riverRoutes: [] };
+  const count = Math.max(1, Math.round(regions.length * ratio));
+  const { edges, adjacency } = buildBoundaryEdgeGraph(regions);
+  const coastPoints = new Set(edges.filter((edge) => edge.coastal).flatMap((edge) => edge.pointKeys));
+  const coastDistances = distancesFromCoast(edges, adjacency, coastPoints);
+  const candidates = rng.shuffle(edges.map((edge, index) => ({ edge, index })))
+    .filter(({ edge, index }) => !edge.coastal && coastDistances[index] >= 4)
+    .sort((first, second) => coastDistances[second.index] - coastDistances[first.index]);
+  const used = new Set();
+  const riverRoutes = [];
+  for (const { index } of candidates) {
+    if (riverRoutes.length >= count) break;
+    if (used.has(index)) continue;
+    const route = findRiverEdgeRoute(index, edges, adjacency, coastPoints, used, rng);
+    if (route.length < 5) continue;
+    const oriented = orientRiverRoute(route, edges, coastPoints);
+    if (!oriented.at(-1)?.mouth) continue;
+    route.forEach((edgeIndex) => used.add(edgeIndex));
+    riverRoutes.push(oriented);
+  }
+  const riverPairs = new Set();
+  riverRoutes.flat().forEach(({ regions: [first, second] }) => {
+    if (second !== null) riverPairs.add(`${Math.min(first, second)}:${Math.max(first, second)}`);
+  });
+  return {
+    rivers: [...riverPairs].map((edge) => edge.split(":").map(Number)),
+    riverPaths: [],
+    riverRoutes,
+  };
+}
+
 function mapBounds(cells) {
   const points = cells.flatMap((cell) => getHexPoints(cell.q, cell.r));
   const xs = points.map((point) => point.x);
@@ -345,7 +517,7 @@ function mapBounds(cells) {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
-export function generateMap({ size = "medium", seed = "dicefront" } = {}) {
+export function generateMap({ size = "medium", seed = "dicefront", riverDensity = "normal" } = {}) {
   const regionCount = MAP_SIZES[size];
   if (!regionCount) throw new RangeError(`Unknown map size: ${size}`);
   const rng = new SeededRandom(`${seed}:map`);
@@ -354,12 +526,17 @@ export function generateMap({ size = "medium", seed = "dicefront" } = {}) {
   const land = createLand(regionCount, profile, rng);
   const { cells, assignment } = partitionLand(land, regionCount, rng);
   const regions = buildRegions(cells, assignment, regionCount);
+  annotateCoasts(regions, land);
+  const riverData = selectRivers(regions, riverDensity, new SeededRandom(`${seed}:rivers:${riverDensity}`));
   return {
     size,
     seed: String(seed),
     profile,
     bounds: mapBounds(cells),
     regions,
+    rivers: riverData.rivers,
+    riverPaths: riverData.riverPaths,
+    riverRoutes: riverData.riverRoutes,
   };
 }
 

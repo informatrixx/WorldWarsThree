@@ -11,17 +11,23 @@ import {
   discardCard,
   endTurn,
   getBattleModifierSummary,
+  getAvailableStances,
+  getRecommendedStance,
   getLegalAttacks,
   getLegalCardTargets,
   getLegalTargets,
+  getSupplyNetwork,
+  isRegionSupplied,
   playCard,
   requiresCardDiscard,
   resolveAttack,
   serializeGame,
   SUPPLY_RATES,
+  TERRAIN_TYPES,
   UNIT_CAP,
   validateGameState,
 } from "../src/core/game.js";
+import { cellKey, getHexPoints } from "../src/core/map-generator.js";
 
 function gameConfig(overrides = {}) {
   return {
@@ -216,44 +222,234 @@ test("battle modifier summaries expose relative terrain and class bonuses", () =
   const target = state.map.regions[targetId];
   source.units = ["armor", "armor", "artillery", "artillery", "artillery"];
   target.units = ["infantry", "armor"];
+  target.isCoastal = false;
+  state.map.rivers = [];
 
   target.terrain = "plains";
-  assert.deepEqual(getBattleModifierSummary(state, sourceId, targetId), {
-    attackerBonus: 4,
-    defenderBonus: 0,
-    netBonus: 4,
-    attackerTerrainBonus: 4,
-    defenderTerrainBonus: 0,
-    attackerCardBonus: 0,
-    defenderCardBonus: 0,
-  });
+  let summary = getBattleModifierSummary(state, sourceId, targetId);
+  assert.equal(summary.attackerBonus, 4);
+  assert.equal(summary.defenderBonus, 0);
+  assert.equal(summary.netBonus, 4);
 
   target.terrain = "forest";
-  assert.deepEqual(getBattleModifierSummary(state, sourceId, targetId), {
-    attackerBonus: 2,
-    defenderBonus: 1,
-    netBonus: 1,
-    attackerTerrainBonus: 2,
-    defenderTerrainBonus: 1,
-    attackerCardBonus: 0,
-    defenderCardBonus: 0,
-  });
+  summary = getBattleModifierSummary(state, sourceId, targetId);
+  assert.equal(summary.attackerBonus, 2);
+  assert.equal(summary.defenderBonus, 1);
+  assert.equal(summary.netBonus, 1);
 
   source.units = ["infantry", "infantry"];
   target.units = ["infantry", "infantry", "infantry"];
-  assert.deepEqual(getBattleModifierSummary(state, sourceId, targetId), {
-    attackerBonus: 0,
-    defenderBonus: 3,
-    netBonus: -3,
-    attackerTerrainBonus: 0,
-    defenderTerrainBonus: 3,
-    attackerCardBonus: 0,
-    defenderCardBonus: 0,
-  });
+  summary = getBattleModifierSummary(state, sourceId, targetId);
+  assert.equal(summary.attackerBonus, 0);
+  assert.equal(summary.defenderBonus, 3);
+  assert.equal(summary.netBonus, -3);
 
   target.terrain = "plains";
   assert.equal(getBattleModifierSummary(state, sourceId, targetId).netBonus, 0);
   assert.equal(getBattleModifierSummary(state, -1, targetId), null);
+});
+
+test("river density, coast detection, and swamp terrain are deterministic", () => {
+  const none = createGame(gameConfig({ riverDensity: "none", seed: "terrain-expansion" }));
+  const normal = createGame(gameConfig({ riverDensity: "normal", seed: "terrain-expansion" }));
+  const same = createGame(gameConfig({ riverDensity: "normal", seed: "terrain-expansion" }));
+  assert.equal(none.map.rivers.length, 0);
+  assert.equal(none.map.riverRoutes.length, 0);
+  assert.ok(normal.map.rivers.length > 0);
+  assert.deepEqual(normal.map.rivers, same.map.rivers);
+  assert.deepEqual(normal.map.riverPaths, same.map.riverPaths);
+  assert.deepEqual(normal.map.riverRoutes, same.map.riverRoutes);
+  assert.ok(normal.map.riverRoutes.length > 0);
+  const directions = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+  const edgeCorners = [[0, 1], [5, 0], [4, 5], [3, 4], [2, 3], [1, 2]];
+  const rounded = (value) => Number(value.toFixed(2)) || 0;
+  const pointKey = (point) => `${rounded(point.x)},${rounded(point.y)}`;
+  const edgeKey = (from, to) => [pointKey(from), pointKey(to)].sort().join("|");
+  const land = new Set(normal.map.regions.flatMap((region) => (
+    region.cells.map((cell) => cellKey(cell.q, cell.r))
+  )));
+  const coastEdges = new Set();
+  const coastPoints = new Set();
+  normal.map.regions.forEach((region) => region.cells.forEach((cell) => {
+    const corners = getHexPoints(cell.q, cell.r);
+    directions.forEach(([dq, dr], index) => {
+      if (land.has(cellKey(cell.q + dq, cell.r + dr))) return;
+      const from = corners[edgeCorners[index][0]];
+      const to = corners[edgeCorners[index][1]];
+      coastEdges.add(edgeKey(from, to));
+      coastPoints.add(pointKey(from));
+      coastPoints.add(pointKey(to));
+    });
+  }));
+  assert.ok(normal.map.riverRoutes.every((route) => (
+    route.length >= 5
+    && route.at(-1).mouth === true
+    && route.every((segment) => segment.regions.every(Number.isInteger))
+    && route.every((segment) => !coastEdges.has(edgeKey(segment.from, segment.to)))
+    && route.slice(0, -1).every((segment) => segment.mouth !== true)
+    && !coastPoints.has(pointKey(route[0].from))
+    && !coastPoints.has(pointKey(route[0].to))
+    && coastPoints.has(pointKey(route.at(-1).to))
+    && route.at(-1).regions.some((regionId) => normal.map.regions[regionId].isCoastal)
+    && route.slice(1).every((segment, index) => (
+      Math.abs(route[index].to.x - segment.from.x) < 0.02
+      && Math.abs(route[index].to.y - segment.from.y) < 0.02
+    ))
+  )));
+  assert.ok(normal.map.regions.some((region) => region.isCoastal));
+  assert.ok(normal.map.regions.some((region) => region.terrain === "swamp"));
+  assert.ok(normal.map.regions.every((region) => new Set(region.units).size <= 3));
+  assert.ok(TERRAIN_TYPES.includes("swamp"));
+});
+
+test("stances strongly boost their matching class while penalizing the others", () => {
+  const state = createGame(gameConfig({ playerCount: 2, riverDensity: "none", seed: "stance-test" }));
+  const { sourceId, targetId } = firstLegalAttack(state);
+  const source = state.map.regions[sourceId];
+  const target = state.map.regions[targetId];
+  source.units = ["armor", "infantry"];
+  target.units = ["infantry", "armor"];
+  target.terrain = "plains";
+  target.isCoastal = false;
+  const stances = getAvailableStances(state, sourceId, targetId);
+  assert.ok(stances.includes("breakthrough"));
+  const summary = getBattleModifierSummary(state, sourceId, targetId, "breakthrough");
+  assert.equal(summary.attackerStancePenalty, -1);
+  assert.equal(summary.attackerStancePrimaryBonus, 1);
+  assert.equal(summary.breakthroughBonus, 1);
+  assert.equal(summary.attackerTerrainBonus, 1);
+  assert.equal(summary.attackerBonus, 2);
+  const result = resolveAttack(state, sourceId, targetId, {
+    stance: "breakthrough",
+    attackerRolls: [4, 4],
+    defenderRolls: [1, 1],
+  });
+  assert.equal(result.battle.stance, "breakthrough");
+  assert.equal(result.battle.attackerDice.find((die) => die.type === "armor").modifier, 2);
+  assert.equal(result.battle.attackerDice.find((die) => die.type === "infantry").modifier, -1);
+});
+
+test("recommended stances maximize battle odds and keep standard on ties", () => {
+  const state = createGame(gameConfig({ playerCount: 2, riverDensity: "none", seed: "recommended-stance-test" }));
+  const { sourceId, targetId } = firstLegalAttack(state);
+  const source = state.map.regions[sourceId];
+  const target = state.map.regions[targetId];
+  source.units = ["armor", "armor", "infantry"];
+  target.units = ["infantry", "infantry"];
+  target.terrain = "plains";
+  target.isCoastal = false;
+  state.map.rivers = [];
+
+  const recommended = getRecommendedStance(state, sourceId, targetId);
+  assert.equal(recommended, "breakthrough");
+  assert.ok(computeBattleOdds(state, sourceId, targetId, recommended) > computeBattleOdds(state, sourceId, targetId));
+
+  source.units = ["infantry", "supply", "snipers"];
+  target.terrain = "hills";
+  assert.equal(getRecommendedStance(state, sourceId, targetId), null);
+});
+
+test("a successful strictly riskier manual stance loots a card without overflowing the hand", () => {
+  const state = createGame(gameConfig({ cardsEnabled: true, playerCount: 2, riverDensity: "none", seed: "risk-loot-test" }));
+  const { sourceId, targetId } = firstLegalAttack(state);
+  const source = state.map.regions[sourceId];
+  const target = state.map.regions[targetId];
+  source.units = ["armor", "armor", "infantry"];
+  target.units = ["infantry"];
+  target.terrain = "plains";
+  target.isCoastal = false;
+  state.map.rivers = [];
+  setActiveHand(state, ["supplyDrop"]);
+
+  assert.equal(getRecommendedStance(state, sourceId, targetId), "breakthrough");
+  const result = resolveAttack(state, sourceId, targetId, {
+    stance: "security",
+    attackerRolls: [6, 6, 6],
+    defenderRolls: [1],
+  });
+  assert.equal(result.battle.attackerWon, true);
+  assert.ok(result.battle.tacticalLootCardType);
+  assert.equal(result.state.players[0].hand.length, 2);
+  assert.equal(result.state.log[0].type, "tacticalLoot");
+
+  const fullHand = createGame(gameConfig({ cardsEnabled: true, playerCount: 2, riverDensity: "none", seed: "risk-loot-full-hand-test" }));
+  const fullAttack = firstLegalAttack(fullHand);
+  fullHand.map.regions[fullAttack.sourceId].units = ["armor", "armor", "infantry"];
+  fullHand.map.regions[fullAttack.targetId].units = ["infantry"];
+  fullHand.map.regions[fullAttack.targetId].terrain = "plains";
+  fullHand.map.regions[fullAttack.targetId].isCoastal = false;
+  fullHand.map.rivers = [];
+  setActiveHand(fullHand, ["supplyDrop", "redeploy", "fortification"]);
+  const noLoot = resolveAttack(fullHand, fullAttack.sourceId, fullAttack.targetId, {
+    stance: "security",
+    attackerRolls: [6, 6, 6],
+    defenderRolls: [1],
+  });
+  assert.equal(noLoot.battle.tacticalLootCardType, null);
+  assert.equal(noLoot.state.players[0].hand.length, 3);
+
+  const automatic = createGame(gameConfig({ cardsEnabled: true, playerCount: 2, riverDensity: "none", seed: "risk-loot-auto-test" }));
+  const automaticAttack = firstLegalAttack(automatic);
+  automatic.map.regions[automaticAttack.sourceId].units = ["armor", "armor", "infantry"];
+  automatic.map.regions[automaticAttack.targetId].units = ["infantry"];
+  automatic.map.regions[automaticAttack.targetId].terrain = "plains";
+  automatic.map.regions[automaticAttack.targetId].isCoastal = false;
+  automatic.map.rivers = [];
+  const automaticResult = resolveAttack(automatic, automaticAttack.sourceId, automaticAttack.targetId, {
+    stance: getRecommendedStance(automatic, automaticAttack.sourceId, automaticAttack.targetId),
+    attackerRolls: [6, 6, 6],
+    defenderRolls: [1],
+  });
+  assert.equal(automaticResult.battle.tacticalLootCardType, null);
+
+  const tied = createGame(gameConfig({ cardsEnabled: true, playerCount: 2, riverDensity: "none", seed: "risk-loot-tie-test" }));
+  const tiedAttack = firstLegalAttack(tied);
+  tied.map.regions[tiedAttack.sourceId].units = ["infantry", "supply"];
+  tied.map.regions[tiedAttack.targetId].units = ["infantry"];
+  tied.map.regions[tiedAttack.targetId].terrain = "hills";
+  tied.map.regions[tiedAttack.targetId].isCoastal = false;
+  tied.map.rivers = [];
+  assert.equal(getRecommendedStance(tied, tiedAttack.sourceId, tiedAttack.targetId), null);
+  const tiedResult = resolveAttack(tied, tiedAttack.sourceId, tiedAttack.targetId, {
+    stance: "security",
+    attackerRolls: [6, 6, 6],
+    defenderRolls: [1],
+  });
+  assert.equal(tiedResult.battle.tacticalLootCardType, null);
+});
+
+test("pioneers and snipers neutralize their matching terrain penalties", () => {
+  const state = createGame(gameConfig({ playerCount: 2, riverDensity: "none", seed: "specialist-terrain-test" }));
+  const { sourceId, targetId } = firstLegalAttack(state);
+  const source = state.map.regions[sourceId];
+  const target = state.map.regions[targetId];
+  target.terrain = "swamp";
+  target.isCoastal = true;
+  state.map.rivers = [[sourceId, targetId]];
+  source.units = ["pioneers", "snipers"];
+  target.units = ["infantry", "infantry"];
+  const engineering = getBattleModifierSummary(state, sourceId, targetId, "engineering");
+  assert.equal(engineering.riverPenalty, 1);
+  assert.equal(engineering.swampPenalty, 1);
+  assert.equal(engineering.neutralizedTerrainPenalty, 2);
+  const recon = getBattleModifierSummary(state, sourceId, targetId, "recon");
+  assert.equal(recon.coastalPenalty, 1);
+  assert.equal(recon.neutralizedTerrainPenalty, 1);
+});
+
+test("supply stance boosts the next reinforcement only once per turn", () => {
+  const state = createGame(gameConfig({ playerCount: 2, riverDensity: "none", seed: "supply-stance-test" }));
+  const { sourceId, targetId } = firstLegalAttack(state);
+  state.map.regions[sourceId].units = ["supply", "infantry"];
+  state.map.regions[targetId].units = ["infantry"];
+  state.map.regions[targetId].isHeadquarters = false;
+  const result = resolveAttack(state, sourceId, targetId, {
+    stance: "supplySurge",
+    attackerRolls: [6, 6],
+    defenderRolls: [1],
+  });
+  assert.equal(result.state.turn.supplyBoostUsed, true);
+  assert.equal(getAvailableStances(result.state, sourceId).includes("supplySurge"), false);
 });
 
 test("capturing a headquarters eliminates the faction and transfers its territory", () => {
@@ -315,12 +511,59 @@ test("supply strength scales reinforcements and preserves the low default", () =
   assert.throws(() => createGame(gameConfig({ supplyRate: "unlimited" })), /Unknown supply rate/);
 });
 
+test("HQ and city supply networks prioritize supplied regions and apply defense-only isolation penalty", () => {
+  const state = createGame(gameConfig({ cardsEnabled: false, seed: "supply-network-test" }));
+  const supplied = getSupplyNetwork(state, 0);
+  const owned = state.map.regions.filter((region) => region.ownerId === 0);
+  assert.ok(supplied.size > 0);
+  assert.ok(owned.some((region) => !supplied.has(region.id)), "seed should contain a cut-off region");
+  const target = owned.find((region) => !supplied.has(region.id) && region.units.length > 1 && region.terrain !== "city");
+  const source = target && state.map.regions[target.neighbors.find((id) => state.map.regions[id].ownerId === 0) ?? target.neighbors[0]];
+  assert.ok(target && source, "seed should contain a cut-off region with a neighboring source");
+  source.ownerId = 0;
+  source.units = ["infantry", "armor", "artillery"];
+  target.ownerId = 1;
+  target.units = ["infantry", "armor", "artillery"];
+  state.cards.effects.push({ type: "interdiction", playerId: 0, regionId: target.id, targetOwnerId: 1, cardId: "test-interdiction", untilRound: state.turn.round + 1 });
+  const attack = getLegalAttacks(state).find((candidate) => candidate.sourceId === source.id && candidate.targetId === target.id);
+  assert.ok(attack, "cut-off region should have a neighboring attacker");
+  const result = resolveAttack(state, attack.sourceId, attack.targetId, { attackerRolls: [6, 6, 6, 6, 6, 6, 6, 6], defenderRolls: [1, 1, 1, 1] });
+  assert.equal(result.battle.defenderSupplyPenalty, 1);
+  assert.equal(result.battle.defenderDice.length, target.units.length - 1);
+  assert.equal(isRegionSupplied(state, target.id, target.ownerId), false);
+  target.units = ["infantry", "armor", "artillery"];
+  state.players[target.ownerId].skills = ["fortressDoctrine"];
+  const fortified = resolveAttack(state, attack.sourceId, attack.targetId, { attackerRolls: [1], defenderRolls: [1, 1, 1] });
+  assert.equal(fortified.battle.defenderSupplyPenalty, 0);
+  assert.equal(fortified.battle.defenderDice.length, 3);
+});
+
+test("unlockable supply cards can be selected in a constrained card pool", () => {
+  const state = createGame(gameConfig({ cardsEnabled: true, cardPool: ["supplyConvoy", "interdiction"], seed: "unlockable-cards-test" }));
+  const human = state.players[0];
+  const allCards = [...state.cards.drawPile, ...human.hand];
+  const convoy = allCards.find((card) => card.type === "supplyConvoy");
+  const target = state.map.regions.find((region) => region.ownerId === 0 && region.units.length < UNIT_CAP
+    && getSupplyNetwork(state, 0).has(region.id));
+  assert.ok(convoy && target);
+  human.hand = [convoy];
+  state.cards.drawPile = allCards.filter((card) => card.id !== convoy.id);
+  const before = target.units.length;
+  const result = playCard(state, convoy.id, { targetId: target.id });
+  assert.equal(result.result.cardType, "supplyConvoy");
+  assert.ok(result.state.map.regions[target.id].units.length > before);
+  assert.equal(validateGameState(result.state), true);
+});
+
 test("AI only chooses legal attacks and can complete its turn", () => {
   let state = createGame(gameConfig());
   state = endTurn(state);
   const legal = getLegalAttacks(state);
   const choice = chooseAiAttack(state, 0);
-  if (choice) assert.ok(legal.some((attack) => attack.sourceId === choice.sourceId && attack.targetId === choice.targetId));
+  if (choice) {
+    assert.ok(legal.some((attack) => attack.sourceId === choice.sourceId && attack.targetId === choice.targetId));
+    assert.equal(choice.stance, getRecommendedStance(state, choice.sourceId, choice.targetId));
+  }
   const result = playAiTurn(state);
   assert.ok(result.attacks >= 0);
   assert.ok(validateGameState(result.state));
@@ -446,4 +689,19 @@ test("valid games round-trip and invalid save data is rejected", () => {
   delete versionOne.cards;
   versionOne.players.forEach((player) => { delete player.hand; });
   assert.equal(deserializeGame(JSON.stringify(versionOne)), null);
+});
+
+test("schema v3 saves migrate with default supply and skill fields", () => {
+  const current = createGame(gameConfig({ cardsEnabled: false, seed: "migration-test" }));
+  const legacy = JSON.parse(serializeGame(current));
+  legacy.schemaVersion = 3;
+  delete legacy.config.cardPool;
+  delete legacy.config.skillPool;
+  delete legacy.config.skillSlots;
+  delete legacy.config.skillLoadout;
+  legacy.players.forEach((player) => { delete player.skills; });
+  const migrated = deserializeGame(JSON.stringify(legacy));
+  assert.ok(migrated);
+  assert.equal(migrated.schemaVersion, 5);
+  assert.deepEqual(migrated.players.map((player) => player.skills), [[], [], [], []]);
 });
